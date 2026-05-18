@@ -1,0 +1,25 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude Code
+.claude/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Node (将来 npm スクリプトを足した場合に備えて)
+node_modules/
+
+# 書き出した PNG などの作業ファイル
+*.png
+!assets/**/*.png

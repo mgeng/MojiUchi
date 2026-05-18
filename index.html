@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>漫画吹き出し文字入れツール</title>
+  <link rel="stylesheet" href="styles/style.css" />
+</head>
+<body>
+  <header>
+    <h1>漫画吹き出し文字入れツール</h1>
+    <div class="header-actions">
+      <label class="btn">
+        画像を開く
+        <input type="file" id="fileInput" accept="image/*" hidden />
+      </label>
+      <button id="exportBtn" class="btn" disabled>PNG書き出し</button>
+    </div>
+  </header>
+
+  <main id="app">
+    <section id="stageWrapper" class="stage-wrapper">
+      <div id="dropHint" class="drop-hint">
+        ここに画像をドラッグ&ドロップ、または「画像を開く」から選択
+      </div>
+      <div id="stage" class="stage" hidden>
+        <img id="baseImage" alt="" />
+        <div id="layerContainer" class="layer-container"></div>
+      </div>
+    </section>
+
+    <aside id="inspector" class="inspector">
+      <div class="inspector-section">
+        <h2>操作</h2>
+        <p class="hint">画像の好きな位置をクリックすると文字を追加できます。</p>
+      </div>
+
+      <div class="inspector-section" id="textProps" hidden>
+        <h2>選択中のテキスト</h2>
+
+        <label class="field">
+          <span>本文</span>
+          <textarea id="propText" rows="4" placeholder="ここにセリフを入力"></textarea>
+        </label>
+
+        <label class="field">
+          <span>フォント</span>
+          <select id="propFont">
+            <option value="GenEiAntiquePv6">源暎アンチック Pv6</option>
+            <option value="GenEiAntiqueNv6">源暎アンチック Nv6</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>文字サイズ <small id="propSizeValue">24</small>px</span>
+          <input type="range" id="propSize" min="8" max="120" value="24" />
+        </label>
+
+        <label class="field">
+          <span>文字組み</span>
+          <select id="propOrientation">
+            <option value="horizontal">横書き</option>
+            <option value="vertical">縦書き</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>行間 <small id="propLineHeightValue">1.1</small></span>
+          <input type="range" id="propLineHeight" min="0.8" max="2.0" step="0.05" value="1.1" />
+        </label>
+
+        <div class="field-row">
+          <button id="propDelete" class="btn btn-danger">このテキストを削除</button>
+        </div>
+
+        <p class="hint">ドラッグで位置移動、ダブルクリックで本文を直接編集。</p>
+      </div>
+    </aside>
+  </main>
+
+  <script src="src/main.js" defer></script>
+</body>
+</html>
