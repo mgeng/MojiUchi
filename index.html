@@ -14,6 +14,9 @@
         画像を開く
         <input type="file" id="fileInput" accept="image/*" hidden />
       </label>
+      <button id="loadProjectBtn" class="btn" disabled>テキスト読み込み</button>
+      <input id="loadProjectInput" type="file" accept=".json,application/json" hidden />
+      <button id="saveProjectBtn" class="btn" disabled>テキスト保存</button>
       <button id="exportBtn" class="btn" disabled>PNG書き出し</button>
       <button id="memoToggle" class="btn">メモ</button>
     </div>
@@ -60,10 +63,7 @@
 
         <label class="field">
           <span>フォント</span>
-          <select id="propFont">
-            <option value="GenEiAntiquePv6">源暎アンチック Pv6</option>
-            <option value="GenEiAntiqueNv6">源暎アンチック Nv6</option>
-          </select>
+          <select id="propFont"></select>
         </label>
 
         <label class="field">

@@ -1,5 +1,37 @@
 // 漫画吹き出し文字入れツール
 
+// --- フォント設定(ここを追記すれば select と書き出しの両方に反映) ---
+const FONTS = [
+  {
+    name: 'GenEiAntiquePv6',
+    label: '源暎アンチック Pv6',
+    file: 'assets/fonts/GenEiAntiquePv6-M.ttf',
+  },
+  {
+    name: 'GenEiAntiqueNv6',
+    label: '源暎アンチック Nv6',
+    file: 'assets/fonts/GenEiAntiqueNv6-M.ttf',
+  },
+  {
+    name: 'ChikaraDzuyoku',
+    label: '851チカラヅヨク かなA',
+    file: 'assets/fonts/851CHIKARA-DZUYOKU_kanaA_004.ttf',
+  },
+];
+
+const FONT_FILES = Object.fromEntries(FONTS.map((f) => [f.name, f.file]));
+
+function registerFonts() {
+  if (typeof FontFace === 'undefined' || !document.fonts) return;
+  for (const f of FONTS) {
+    const face = new FontFace(f.name, `url(${f.file})`, { display: 'swap' });
+    document.fonts.add(face);
+    face.load().catch((err) => console.warn(`Font load failed: ${f.name}`, err));
+  }
+}
+
+registerFonts();
+
 const els = {
   fileInput: document.getElementById('fileInput'),
   exportBtn: document.getElementById('exportBtn'),
@@ -23,6 +55,9 @@ const els = {
   memoClose: document.getElementById('memoClose'),
   memoText: document.getElementById('memoText'),
   memoFileInput: document.getElementById('memoFileInput'),
+  saveProjectBtn: document.getElementById('saveProjectBtn'),
+  loadProjectBtn: document.getElementById('loadProjectBtn'),
+  loadProjectInput: document.getElementById('loadProjectInput'),
 };
 
 const state = {
@@ -33,6 +68,17 @@ const state = {
   selectedId: null,
   nextId: 1,
 };
+
+function populateFontSelect() {
+  els.propFont.innerHTML = '';
+  for (const f of FONTS) {
+    const opt = document.createElement('option');
+    opt.value = f.name;
+    opt.textContent = f.label;
+    els.propFont.appendChild(opt);
+  }
+}
+populateFontSelect();
 
 const previewCanvas = document.createElement('canvas');
 previewCanvas.className = 'text-preview-canvas';
@@ -70,6 +116,8 @@ function loadImageFile(file) {
       els.dropHint.hidden = true;
       els.stage.hidden = false;
       els.exportBtn.disabled = false;
+      els.saveProjectBtn.disabled = false;
+      els.loadProjectBtn.disabled = false;
       // 既存レイヤーをクリア
       state.layers.forEach((l) => l.el.remove());
       state.layers = [];
@@ -96,17 +144,17 @@ els.layerContainer.addEventListener('click', (e) => {
   addTextLayer({ x, y });
 });
 
-function addTextLayer({ x, y, text = 'テキスト' }) {
+function addTextLayer({ x, y, text = 'テキスト', font, size, orientation, lineHeight }) {
   const id = state.nextId++;
   const layer = {
     id,
     text,
     x,
     y,
-    font: els.propFont.value || 'GenEiAntiquePv6',
-    size: 24,
-    orientation: 'horizontal',
-    lineHeight: 1.1,
+    font: font || els.propFont.value || 'GenEiAntiquePv6',
+    size: size ?? 24,
+    orientation: orientation || 'horizontal',
+    lineHeight: lineHeight ?? 1.1,
     el: null,
   };
   const el = document.createElement('div');
@@ -364,11 +412,6 @@ els.propDelete.addEventListener('click', () => {
 // --- PNG 書き出し ---
 // Canvas に元画像とテキストを直接描画して、tainted canvas を避ける方式。
 
-const FONT_FILES = {
-  GenEiAntiquePv6: 'assets/fonts/GenEiAntiquePv6-M.ttf',
-  GenEiAntiqueNv6: 'assets/fonts/GenEiAntiqueNv6-M.ttf',
-};
-
 async function ensureExportFontsReady() {
   const usedFonts = new Set();
   for (const layer of state.layers) {
@@ -522,6 +565,89 @@ function downloadBlob(blob, filename) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// --- プロジェクト保存・読み込み(テキストレイヤー) ---
+
+const PROJECT_VERSION = 1;
+
+function buildProjectData() {
+  return {
+    version: PROJECT_VERSION,
+    image: {
+      width: state.imageNaturalWidth,
+      height: state.imageNaturalHeight,
+    },
+    layers: state.layers.map((l) => ({
+      text: l.text,
+      x: l.x,
+      y: l.y,
+      font: l.font,
+      size: l.size,
+      orientation: l.orientation,
+      lineHeight: l.lineHeight,
+    })),
+  };
+}
+
+function applyProjectData(data) {
+  state.layers.forEach((l) => l.el.remove());
+  state.layers = [];
+  state.selectedId = null;
+  state.nextId = 1;
+  for (const l of data.layers) {
+    addTextLayer({
+      x: Number(l.x) || 0,
+      y: Number(l.y) || 0,
+      text: typeof l.text === 'string' ? l.text : '',
+      font: l.font,
+      size: typeof l.size === 'number' ? l.size : undefined,
+      orientation: l.orientation,
+      lineHeight: typeof l.lineHeight === 'number' ? l.lineHeight : undefined,
+    });
+  }
+  deselect();
+}
+
+els.saveProjectBtn.addEventListener('click', () => {
+  if (!state.imageLoaded) return;
+  const json = JSON.stringify(buildProjectData(), null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  downloadBlob(blob, 'mojiuchi-text.json');
+});
+
+els.loadProjectBtn.addEventListener('click', () => {
+  if (!state.imageLoaded) return;
+  els.loadProjectInput.click();
+});
+
+els.loadProjectInput.addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  els.loadProjectInput.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    let data;
+    try {
+      data = JSON.parse(String(ev.target.result || ''));
+    } catch {
+      alert('JSON の読み込みに失敗しました。ファイル形式が正しいか確認してください。');
+      return;
+    }
+    if (!data || !Array.isArray(data.layers)) {
+      alert('テキストデータが見つかりません。');
+      return;
+    }
+    if (state.layers.length > 0 && !confirm('既存のテキストをすべて置き換えます。よろしいですか?')) return;
+    if (data.image && (data.image.width !== state.imageNaturalWidth || data.image.height !== state.imageNaturalHeight)) {
+      const ok = confirm(
+        `画像サイズが保存時と異なります(保存: ${data.image.width}x${data.image.height} / 現在: ${state.imageNaturalWidth}x${state.imageNaturalHeight})。\n位置がずれる可能性があります。続行しますか?`
+      );
+      if (!ok) return;
+    }
+    applyProjectData(data);
+  };
+  reader.readAsText(file);
+});
 
 // --- メモパネル(付箋風フローティング) ---
 
