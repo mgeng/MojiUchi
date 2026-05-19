@@ -98,8 +98,8 @@ header h1 {
   overflow: auto;
   background: #2b2b2b;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: safe center;
+  justify-content: safe center;
   padding: 24px;
 }
 
