@@ -290,81 +290,129 @@ els.propDelete.addEventListener('click', () => {
 });
 
 // --- PNG 書き出し ---
+// SVG <foreignObject> に DOM をそのまま流し込み、ブラウザのネイティブな
+// テキスト描画(縦書き / OpenType vert / 濁点合成)に任せる方式。
+
+const FONT_FILES = {
+  GenEiAntiquePv6: 'assets/fonts/GenEiAntiquePv6-M.ttf',
+  GenEiAntiqueNv6: 'assets/fonts/GenEiAntiqueNv6-M.ttf',
+};
+const fontDataUrlCache = new Map();
+
+async function getFontDataUrl(name) {
+  if (fontDataUrlCache.has(name)) return fontDataUrlCache.get(name);
+  const path = FONT_FILES[name];
+  if (!path) return null;
+  const resp = await fetch(path);
+  if (!resp.ok) throw new Error(`Failed to fetch font ${path}`);
+  const buf = await resp.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  // 大きなフォントでも call stack を超えないよう分割して base64 化
+  const CHUNK = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  const dataUrl = `data:font/ttf;base64,${btoa(binary)}`;
+  fontDataUrlCache.set(name, dataUrl);
+  return dataUrl;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function layerToExportHtml(layer) {
+  const cls = layer.orientation === 'vertical' ? 'tl v' : 'tl';
+  const style = [
+    `left:${layer.x}px`,
+    `top:${layer.y}px`,
+    `font-family:'${layer.font}',sans-serif`,
+    `font-size:${layer.size}px`,
+    `line-height:${layer.lineHeight}`,
+  ].join(';');
+  return `<div class="${cls}" style="${style}">${escapeHtml(layer.text)}</div>`;
+}
+
+async function buildExportSvg() {
+  const usedFonts = new Set();
+  for (const l of state.layers) {
+    if (FONT_FILES[l.font]) usedFonts.add(l.font);
+  }
+  const fontFaceCss = (
+    await Promise.all([...usedFonts].map(async (name) => {
+      const url = await getFontDataUrl(name);
+      return url
+        ? `@font-face{font-family:'${name}';src:url(${url}) format('truetype');font-display:block;}`
+        : '';
+    }))
+  ).join('');
+
+  const W = state.imageNaturalWidth;
+  const H = state.imageNaturalHeight;
+  const layersHtml = state.layers.map(layerToExportHtml).join('');
+  const css =
+    `${fontFaceCss}` +
+    `.tl{position:absolute;color:#000;white-space:pre-wrap;word-break:break-word;}` +
+    `.tl.v{writing-mode:vertical-rl;text-orientation:upright;}`;
+
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">` +
+    `<foreignObject x="0" y="0" width="${W}" height="${H}">` +
+    `<div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:${W}px;height:${H}px;">` +
+    `<style>${css}</style>${layersHtml}</div>` +
+    `</foreignObject></svg>`
+  );
+}
 
 els.exportBtn.addEventListener('click', async () => {
   if (!state.imageLoaded) return;
-  // フォント読み込み完了を待つ
-  if (document.fonts && document.fonts.ready) {
-    try { await document.fonts.ready; } catch (_) {}
+  els.exportBtn.disabled = true;
+  let svgUrl = null;
+  try {
+    if (document.fonts && document.fonts.ready) {
+      try { await document.fonts.ready; } catch (_) {}
+    }
+    const svgString = await buildExportSvg();
+    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    svgUrl = URL.createObjectURL(svgBlob);
+
+    const img = new Image();
+    img.src = svgUrl;
+    await img.decode();
+
+    const canvas = document.createElement('canvas');
+    canvas.width = state.imageNaturalWidth;
+    canvas.height = state.imageNaturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(els.baseImage, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    await new Promise((resolve) => {
+      canvas.toBlob((pngBlob) => {
+        if (pngBlob) {
+          const url = URL.createObjectURL(pngBlob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'mojiuchi.png';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+        resolve();
+      }, 'image/png');
+    });
+  } catch (err) {
+    console.error(err);
+    alert('PNG 書き出しに失敗しました: ' + (err && err.message ? err.message : err));
+  } finally {
+    if (svgUrl) URL.revokeObjectURL(svgUrl);
+    els.exportBtn.disabled = false;
   }
-  const canvas = document.createElement('canvas');
-  canvas.width = state.imageNaturalWidth;
-  canvas.height = state.imageNaturalHeight;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(els.baseImage, 0, 0, canvas.width, canvas.height);
-
-  state.layers.forEach((layer) => drawLayerOnCanvas(ctx, layer));
-
-  canvas.toBlob((blob) => {
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'mojiuchi.png';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }, 'image/png');
 });
-
-function drawLayerOnCanvas(ctx, layer) {
-  ctx.save();
-  ctx.fillStyle = '#000';
-  ctx.textBaseline = 'top';
-  ctx.font = `${layer.size}px '${layer.font}', sans-serif`;
-
-  // DOM 表示と一致させるため、要素の content box の位置を画像座標で取得する。
-  // (CSS の padding / border / 行ボックス内の半行送りを反映)
-  const containerRect = els.layerContainer.getBoundingClientRect();
-  const scale = state.imageNaturalWidth / containerRect.width;
-  const elRect = layer.el.getBoundingClientRect();
-  const style = window.getComputedStyle(layer.el);
-  const padLeft = parseFloat(style.paddingLeft) || 0;
-  const padTop = parseFloat(style.paddingTop) || 0;
-  const padRight = parseFloat(style.paddingRight) || 0;
-  const bdLeft = parseFloat(style.borderLeftWidth) || 0;
-  const bdTop = parseFloat(style.borderTopWidth) || 0;
-  const bdRight = parseFloat(style.borderRightWidth) || 0;
-
-  const contentLeft = ((elRect.left - containerRect.left) + bdLeft + padLeft) * scale;
-  const contentTop = ((elRect.top - containerRect.top) + bdTop + padTop) * scale;
-  const contentRight = ((elRect.right - containerRect.left) - bdRight - padRight) * scale;
-
-  const lines = String(layer.text).split('\n');
-  const halfLeading = layer.size * (layer.lineHeight - 1) / 2;
-  const colGap = layer.size * layer.lineHeight;
-
-  if (layer.orientation === 'vertical') {
-    // writing-mode: vertical-rl では最初の列が content box の右端。
-    // 列の line box 幅 = size × line-height、EM box はその中央に置かれるので
-    // 最初の列のグリフ左端 = contentRight - halfLeading - 1em。
-    // 列内のグリフ送りは 1em、列間は line-height。
-    let colX = contentRight - halfLeading - layer.size;
-    for (let li = 0; li < lines.length; li++) {
-      const line = lines[li];
-      let y = contentTop;
-      for (const ch of Array.from(line)) {
-        ctx.fillText(ch, colX, y);
-        y += layer.size;
-      }
-      colX -= colGap;
-    }
-  } else {
-    // 横書き: line box の上端から halfLeading 下に EM box が来る。
-    for (let i = 0; i < lines.length; i++) {
-      ctx.fillText(lines[i], contentLeft, contentTop + halfLeading + i * colGap);
-    }
-  }
-  ctx.restore();
-}

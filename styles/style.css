@@ -143,24 +143,23 @@ header h1 {
   position: absolute;
   min-width: 1em;
   min-height: 1em;
-  padding: 2px 4px;
   color: #000;
   cursor: move;
   white-space: pre-wrap;
   word-break: break-word;
-  border: 1px dashed transparent;
-  outline: none;
+  outline: 1px dashed transparent;
+  outline-offset: -1px;
   background: transparent;
   user-select: none;
   font-family: 'GenEiAntiquePv6', sans-serif;
 }
 
 .text-layer:hover {
-  border-color: rgba(42, 109, 244, 0.5);
+  outline-color: rgba(42, 109, 244, 0.5);
 }
 
 .text-layer.selected {
-  border-color: #2a6df4;
+  outline-color: #2a6df4;
 }
 
 .text-layer.editing {
