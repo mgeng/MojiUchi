@@ -252,3 +252,95 @@ header h1 {
 .field-row .btn {
   flex: 1;
 }
+
+.memo-panel {
+  position: fixed;
+  top: 80px;
+  left: 40px;
+  width: 240px;
+  height: 220px;
+  min-width: 160px;
+  min-height: 120px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  resize: both;
+  overflow: hidden;
+  z-index: 100;
+}
+
+.memo-panel[hidden] {
+  display: none;
+}
+
+.memo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: #f5f5f5;
+  border-bottom: 1px solid #eee;
+  padding: 4px 6px 4px 10px;
+  cursor: move;
+  user-select: none;
+  font-size: 12px;
+  font-weight: bold;
+  color: #555;
+  flex: 0 0 auto;
+}
+
+.memo-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.memo-open-btn {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: 1px solid #2a6df4;
+  color: #2a6df4;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  user-select: none;
+}
+
+.memo-open-btn:hover {
+  background: #2a6df4;
+  color: #fff;
+}
+
+.memo-close {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+  color: #555;
+  font-family: inherit;
+}
+
+.memo-close:hover {
+  color: #222;
+}
+
+.memo-body {
+  flex: 1 1 auto;
+  border: none;
+  background: transparent;
+  resize: none;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+  color: #222;
+}

@@ -17,6 +17,12 @@ const els = {
   propLineHeight: document.getElementById('propLineHeight'),
   propLineHeightValue: document.getElementById('propLineHeightValue'),
   propDelete: document.getElementById('propDelete'),
+  memoToggle: document.getElementById('memoToggle'),
+  memoPanel: document.getElementById('memoPanel'),
+  memoHeader: document.getElementById('memoHeader'),
+  memoClose: document.getElementById('memoClose'),
+  memoText: document.getElementById('memoText'),
+  memoFileInput: document.getElementById('memoFileInput'),
 };
 
 const state = {
@@ -516,6 +522,62 @@ function downloadBlob(blob, filename) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// --- メモパネル(付箋風フローティング) ---
+
+els.memoToggle.addEventListener('click', () => {
+  els.memoPanel.hidden = !els.memoPanel.hidden;
+});
+els.memoClose.addEventListener('click', () => {
+  els.memoPanel.hidden = true;
+});
+
+els.memoFileInput.addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  els.memoFileInput.value = '';
+  if (!file) return;
+  if (els.memoText.value.trim() && !confirm('現在のメモを上書きします。よろしいですか?')) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const buf = ev.target.result;
+    let text;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(buf);
+    } catch {
+      // UTF-8 として読めない場合は Shift_JIS にフォールバック
+      text = new TextDecoder('shift_jis').decode(buf);
+    }
+    els.memoText.value = text;
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+els.memoHeader.addEventListener('mousedown', (e) => {
+  if (e.target.closest('.memo-actions')) return;
+  e.preventDefault();
+  const rect = els.memoPanel.getBoundingClientRect();
+  const startX = e.clientX;
+  const startY = e.clientY;
+  const origLeft = rect.left;
+  const origTop = rect.top;
+  els.memoPanel.style.left = `${origLeft}px`;
+  els.memoPanel.style.top = `${origTop}px`;
+
+  const onMove = (ev) => {
+    const nx = origLeft + (ev.clientX - startX);
+    const ny = origTop + (ev.clientY - startY);
+    const maxX = window.innerWidth - 40;
+    const maxY = window.innerHeight - 40;
+    els.memoPanel.style.left = `${Math.min(Math.max(nx, -rect.width + 40), maxX)}px`;
+    els.memoPanel.style.top = `${Math.min(Math.max(ny, 0), maxY)}px`;
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+});
 
 els.exportBtn.addEventListener('click', async () => {
   if (!state.imageLoaded) return;

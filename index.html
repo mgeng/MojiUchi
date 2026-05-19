@@ -15,8 +15,23 @@
         <input type="file" id="fileInput" accept="image/*" hidden />
       </label>
       <button id="exportBtn" class="btn" disabled>PNG書き出し</button>
+      <button id="memoToggle" class="btn">メモ</button>
     </div>
   </header>
+
+  <div id="memoPanel" class="memo-panel">
+    <div id="memoHeader" class="memo-header">
+      <span class="memo-title">メモ</span>
+      <div class="memo-actions">
+        <label class="memo-open-btn" title="テキストファイルを開く">
+          開く
+          <input type="file" id="memoFileInput" accept=".txt,text/plain" hidden />
+        </label>
+        <button id="memoClose" class="memo-close" aria-label="閉じる" title="閉じる">×</button>
+      </div>
+    </div>
+    <textarea id="memoText" class="memo-body" placeholder="セリフ案などを置いておく場所"></textarea>
+  </div>
 
   <main id="app">
     <section id="stageWrapper" class="stage-wrapper">
