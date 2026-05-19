@@ -28,6 +28,10 @@ const state = {
   nextId: 1,
 };
 
+const previewCanvas = document.createElement('canvas');
+previewCanvas.className = 'text-preview-canvas';
+els.layerContainer.prepend(previewCanvas);
+
 // --- 画像読み込み ---
 
 els.fileInput.addEventListener('change', (e) => {
@@ -64,6 +68,7 @@ function loadImageFile(file) {
       state.layers.forEach((l) => l.el.remove());
       state.layers = [];
       state.selectedId = null;
+      renderTextPreview();
       updateInspector();
     };
     els.baseImage.src = ev.target.result;
@@ -108,6 +113,7 @@ function addTextLayer({ x, y, text = 'テキスト' }) {
 
   attachLayerHandlers(layer);
   applyLayerStyle(layer);
+  renderTextPreview();
 
   selectLayer(id);
 }
@@ -136,6 +142,7 @@ function attachLayerHandlers(layer) {
       layer.x = origLayerX + dx;
       layer.y = origLayerY + dy;
       applyLayerStyle(layer);
+      renderTextPreview();
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
@@ -160,6 +167,7 @@ function enterEditMode(layer) {
   layer.el.classList.add('editing');
   layer.el.contentEditable = 'true';
   layer.el.focus();
+  renderTextPreview();
 
   // テキスト全体を選択
   const range = document.createRange();
@@ -174,6 +182,8 @@ function enterEditMode(layer) {
     layer.text = layer.el.innerText;
     els.propText.value = layer.text;
     layer.el.removeEventListener('blur', finish);
+    applyLayerStyle(layer);
+    renderTextPreview();
   };
   layer.el.addEventListener('blur', finish);
 }
@@ -210,8 +220,11 @@ function applyLayerStyle(layer) {
   // 画像ネイティブ座標 → 表示座標
   const displayWidth = els.baseImage.clientWidth;
   const scale = displayWidth / state.imageNaturalWidth;
-  el.style.left = `${layer.x * scale}px`;
-  el.style.top = `${layer.y * scale}px`;
+  const bounds = measureTextLayerBounds(layer);
+  el.style.left = `${(layer.x + bounds.x) * scale}px`;
+  el.style.top = `${(layer.y + bounds.y) * scale}px`;
+  el.style.width = `${Math.max(bounds.width * scale, layer.size * scale)}px`;
+  el.style.height = `${Math.max(bounds.height * scale, layer.size * scale)}px`;
   el.style.fontFamily = `'${layer.font}', sans-serif`;
   el.style.fontSize = `${layer.size * scale}px`;
   el.style.lineHeight = String(layer.lineHeight);
@@ -220,11 +233,15 @@ function applyLayerStyle(layer) {
 
 function applyAllLayerStyles() {
   state.layers.forEach(applyLayerStyle);
+  renderTextPreview();
 }
 
 // 画像のリサイズ(ウィンドウサイズ変更等)に追随
 window.addEventListener('resize', applyAllLayerStyles);
 els.baseImage.addEventListener('load', applyAllLayerStyles);
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(applyAllLayerStyles).catch(() => {});
+}
 
 // --- インスペクター ---
 
@@ -249,6 +266,8 @@ els.propText.addEventListener('input', () => {
   if (!layer) return;
   layer.text = els.propText.value;
   layer.el.textContent = layer.text;
+  applyLayerStyle(layer);
+  renderTextPreview();
 });
 
 els.propFont.addEventListener('change', () => {
@@ -256,6 +275,7 @@ els.propFont.addEventListener('change', () => {
   if (!layer) return;
   layer.font = els.propFont.value;
   applyLayerStyle(layer);
+  renderTextPreview();
 });
 
 els.propSize.addEventListener('input', () => {
@@ -264,6 +284,7 @@ els.propSize.addEventListener('input', () => {
   layer.size = Number(els.propSize.value);
   els.propSizeValue.textContent = String(layer.size);
   applyLayerStyle(layer);
+  renderTextPreview();
 });
 
 els.propOrientation.addEventListener('change', () => {
@@ -271,6 +292,7 @@ els.propOrientation.addEventListener('change', () => {
   if (!layer) return;
   layer.orientation = els.propOrientation.value;
   applyLayerStyle(layer);
+  renderTextPreview();
 });
 
 els.propLineHeight.addEventListener('input', () => {
@@ -279,6 +301,7 @@ els.propLineHeight.addEventListener('input', () => {
   layer.lineHeight = Number(els.propLineHeight.value);
   els.propLineHeightValue.textContent = String(layer.lineHeight);
   applyLayerStyle(layer);
+  renderTextPreview();
 });
 
 els.propDelete.addEventListener('click', () => {
@@ -286,133 +309,175 @@ els.propDelete.addEventListener('click', () => {
   if (!layer) return;
   layer.el.remove();
   state.layers = state.layers.filter((l) => l.id !== layer.id);
+  renderTextPreview();
   deselect();
 });
 
 // --- PNG 書き出し ---
-// SVG <foreignObject> に DOM をそのまま流し込み、ブラウザのネイティブな
-// テキスト描画(縦書き / OpenType vert / 濁点合成)に任せる方式。
+// Canvas に元画像とテキストを直接描画して、tainted canvas を避ける方式。
 
 const FONT_FILES = {
   GenEiAntiquePv6: 'assets/fonts/GenEiAntiquePv6-M.ttf',
   GenEiAntiqueNv6: 'assets/fonts/GenEiAntiqueNv6-M.ttf',
 };
-const fontDataUrlCache = new Map();
 
-async function getFontDataUrl(name) {
-  if (fontDataUrlCache.has(name)) return fontDataUrlCache.get(name);
-  const path = FONT_FILES[name];
-  if (!path) return null;
-  const resp = await fetch(path);
-  if (!resp.ok) throw new Error(`Failed to fetch font ${path}`);
-  const buf = await resp.arrayBuffer();
-  const bytes = new Uint8Array(buf);
-  // 大きなフォントでも call stack を超えないよう分割して base64 化
-  const CHUNK = 0x8000;
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-  }
-  const dataUrl = `data:font/ttf;base64,${btoa(binary)}`;
-  fontDataUrlCache.set(name, dataUrl);
-  return dataUrl;
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function layerToExportHtml(layer) {
-  const cls = layer.orientation === 'vertical' ? 'tl v' : 'tl';
-  const style = [
-    `left:${layer.x}px`,
-    `top:${layer.y}px`,
-    `font-family:'${layer.font}',sans-serif`,
-    `font-size:${layer.size}px`,
-    `line-height:${layer.lineHeight}`,
-  ].join(';');
-  return `<div class="${cls}" style="${style}">${escapeHtml(layer.text)}</div>`;
-}
-
-async function buildExportSvg() {
+async function ensureExportFontsReady() {
   const usedFonts = new Set();
-  for (const l of state.layers) {
-    if (FONT_FILES[l.font]) usedFonts.add(l.font);
+  for (const layer of state.layers) {
+    if (FONT_FILES[layer.font]) usedFonts.add(layer.font);
   }
-  const fontFaceCss = (
-    await Promise.all([...usedFonts].map(async (name) => {
-      const url = await getFontDataUrl(name);
-      return url
-        ? `@font-face{font-family:'${name}';src:url(${url}) format('truetype');font-display:block;}`
-        : '';
-    }))
-  ).join('');
+  if (!document.fonts) return;
+  await Promise.all([...usedFonts].map((name) => document.fonts.load(`16px "${name}"`)));
+  if (document.fonts.ready) {
+    await document.fonts.ready;
+  }
+}
 
-  const W = state.imageNaturalWidth;
-  const H = state.imageNaturalHeight;
-  const layersHtml = state.layers.map(layerToExportHtml).join('');
-  const css =
-    `${fontFaceCss}` +
-    `.tl{position:absolute;color:#000;white-space:pre-wrap;word-break:break-word;}` +
-    `.tl.v{writing-mode:vertical-rl;text-orientation:upright;}`;
+function splitTextLines(text) {
+  return String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+}
 
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">` +
-    `<foreignObject x="0" y="0" width="${W}" height="${H}">` +
-    `<div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:${W}px;height:${H}px;">` +
-    `<style>${css}</style>${layersHtml}</div>` +
-    `</foreignObject></svg>`
-  );
+function setupTextContext(ctx, layer) {
+  ctx.fillStyle = '#000';
+  ctx.font = `${layer.size}px "${layer.font}", sans-serif`;
+}
+
+function getVerticalGlyphOffset(char, size) {
+  if ('、。，．､｡'.includes(char)) {
+    return {
+      x: size * 0.25,
+      y: -size * 0.45,
+    };
+  }
+  return { x: 0, y: 0 };
+}
+
+function measureTextLayerBounds(layer) {
+  const lines = splitTextLines(layer.text);
+  const lineAdvance = layer.size * layer.lineHeight;
+  if (layer.orientation === 'vertical') {
+    const columns = Math.max(lines.length, 1);
+    const rows = Math.max(...lines.map((line) => [...line].length), 1);
+    return {
+      x: -lineAdvance * (columns - 1),
+      y: 0,
+      width: lineAdvance * (columns - 1) + layer.size,
+      height: lineAdvance * (rows - 1) + layer.size,
+    };
+  }
+
+  const canvas = measureTextLayerBounds.canvas || document.createElement('canvas');
+  measureTextLayerBounds.canvas = canvas;
+  const ctx = canvas.getContext('2d');
+  setupTextContext(ctx, layer);
+  const width = Math.max(...lines.map((line) => ctx.measureText(line).width), layer.size);
+  return {
+    x: 0,
+    y: 0,
+    width,
+    height: Math.max(lines.length, 1) * lineAdvance,
+  };
+}
+
+function syncPreviewCanvasSize() {
+  if (!state.imageLoaded) {
+    previewCanvas.width = 0;
+    previewCanvas.height = 0;
+    return false;
+  }
+  previewCanvas.width = state.imageNaturalWidth;
+  previewCanvas.height = state.imageNaturalHeight;
+  previewCanvas.style.width = `${els.baseImage.clientWidth}px`;
+  previewCanvas.style.height = `${els.baseImage.clientHeight}px`;
+  return previewCanvas.width > 0 && previewCanvas.height > 0;
+}
+
+function renderTextPreview() {
+  if (!syncPreviewCanvasSize()) return;
+  const ctx = previewCanvas.getContext('2d');
+  ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+  state.layers.forEach((layer) => {
+    if (!layer.el.classList.contains('editing')) {
+      drawTextLayer(ctx, layer);
+    }
+  });
+}
+
+function drawHorizontalTextLayer(ctx, layer) {
+  setupTextContext(ctx, layer);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  const lineAdvance = layer.size * layer.lineHeight;
+  splitTextLines(layer.text).forEach((line, index) => {
+    ctx.fillText(line, layer.x, layer.y + lineAdvance * index);
+  });
+}
+
+function drawVerticalTextLayer(ctx, layer) {
+  setupTextContext(ctx, layer);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  const charAdvance = layer.size * layer.lineHeight;
+  const columnAdvance = layer.size * layer.lineHeight;
+  splitTextLines(layer.text).forEach((column, columnIndex) => {
+    const x = layer.x + layer.size / 2 - columnAdvance * columnIndex;
+    for (const [charIndex, char] of [...column].entries()) {
+      const offset = getVerticalGlyphOffset(char, layer.size);
+      ctx.fillText(char, x + offset.x, layer.y + charAdvance * charIndex + offset.y);
+    }
+  });
+}
+
+function drawTextLayer(ctx, layer) {
+  if (layer.orientation === 'vertical') {
+    drawVerticalTextLayer(ctx, layer);
+  } else {
+    drawHorizontalTextLayer(ctx, layer);
+  }
+}
+
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((pngBlob) => {
+      if (pngBlob) {
+        resolve(pngBlob);
+      } else {
+        reject(new Error('PNG blob could not be created.'));
+      }
+    }, 'image/png');
+  });
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 els.exportBtn.addEventListener('click', async () => {
   if (!state.imageLoaded) return;
   els.exportBtn.disabled = true;
-  let svgUrl = null;
   try {
-    if (document.fonts && document.fonts.ready) {
-      try { await document.fonts.ready; } catch (_) {}
-    }
-    const svgString = await buildExportSvg();
-    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-    svgUrl = URL.createObjectURL(svgBlob);
-
-    const img = new Image();
-    img.src = svgUrl;
-    await img.decode();
+    await ensureExportFontsReady();
 
     const canvas = document.createElement('canvas');
     canvas.width = state.imageNaturalWidth;
     canvas.height = state.imageNaturalHeight;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(els.baseImage, 0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    state.layers.forEach((layer) => drawTextLayer(ctx, layer));
 
-    await new Promise((resolve) => {
-      canvas.toBlob((pngBlob) => {
-        if (pngBlob) {
-          const url = URL.createObjectURL(pngBlob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = 'mojiuchi.png';
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-        }
-        resolve();
-      }, 'image/png');
-    });
+    const pngBlob = await canvasToPngBlob(canvas);
+    downloadBlob(pngBlob, 'mojiuchi.png');
   } catch (err) {
     console.error(err);
     alert('PNG 書き出しに失敗しました: ' + (err && err.message ? err.message : err));
   } finally {
-    if (svgUrl) URL.revokeObjectURL(svgUrl);
     els.exportBtn.disabled = false;
   }
 });

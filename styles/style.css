@@ -139,11 +139,18 @@ header h1 {
   line-height: normal;
 }
 
+.text-preview-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+}
+
 .text-layer {
   position: absolute;
   min-width: 1em;
   min-height: 1em;
-  color: #000;
+  color: transparent;
   cursor: move;
   white-space: pre-wrap;
   word-break: break-word;
@@ -163,6 +170,7 @@ header h1 {
 }
 
 .text-layer.editing {
+  color: #000;
   cursor: text;
   user-select: text;
   background: rgba(255, 255, 255, 0.6);
