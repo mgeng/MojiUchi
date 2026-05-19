@@ -217,26 +217,41 @@ const ARROW_DELTAS = {
   ArrowDown: { dx: 0, dy: 1 },
 };
 
-document.addEventListener('keydown', (e) => {
-  const delta = ARROW_DELTAS[e.key];
-  if (!delta) return;
+function isEditableTarget() {
+  const active = document.activeElement;
+  if (!active) return false;
+  const tag = active.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (active.isContentEditable) return true;
+  return false;
+}
 
+function deleteLayer(layer) {
+  layer.el.remove();
+  state.layers = state.layers.filter((l) => l.id !== layer.id);
+  renderTextPreview();
+  deselect();
+}
+
+document.addEventListener('keydown', (e) => {
   const layer = getSelectedLayer();
   if (!layer) return;
+  if (isEditableTarget()) return;
 
-  // フォーム要素や本文編集中はネイティブの矢印キー動作を優先
-  const active = document.activeElement;
-  if (active) {
-    const tag = active.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-    if (active.isContentEditable) return;
+  const delta = ARROW_DELTAS[e.key];
+  if (delta) {
+    e.preventDefault();
+    layer.x += delta.dx;
+    layer.y += delta.dy;
+    applyLayerStyle(layer);
+    renderTextPreview();
+    return;
   }
 
-  e.preventDefault();
-  layer.x += delta.dx;
-  layer.y += delta.dy;
-  applyLayerStyle(layer);
-  renderTextPreview();
+  if (e.key === 'Delete') {
+    e.preventDefault();
+    deleteLayer(layer);
+  }
 });
 
 function getSelectedLayer() {
@@ -337,10 +352,7 @@ els.propLineHeight.addEventListener('input', () => {
 els.propDelete.addEventListener('click', () => {
   const layer = getSelectedLayer();
   if (!layer) return;
-  layer.el.remove();
-  state.layers = state.layers.filter((l) => l.id !== layer.id);
-  renderTextPreview();
-  deselect();
+  deleteLayer(layer);
 });
 
 // --- PNG 書き出し ---
