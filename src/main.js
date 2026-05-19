@@ -352,6 +352,23 @@ function getVerticalGlyphOffset(char, size) {
   return { x: 0, y: 0 };
 }
 
+function drawVerticalGlyph(ctx, char, x, y, size) {
+  const offset = getVerticalGlyphOffset(char, size);
+  const drawX = x + offset.x;
+  const drawY = y + offset.y;
+
+  if ('…‥ーｰ'.includes(char)) {
+    ctx.save();
+    ctx.translate(drawX, drawY + size / 2);
+    ctx.rotate(Math.PI / 2);
+    ctx.fillText(char, 0, -size / 2);
+    ctx.restore();
+    return;
+  }
+
+  ctx.fillText(char, drawX, drawY);
+}
+
 function measureTextLayerBounds(layer) {
   const lines = splitTextLines(layer.text);
   const lineAdvance = layer.size * layer.lineHeight;
@@ -422,8 +439,7 @@ function drawVerticalTextLayer(ctx, layer) {
   splitTextLines(layer.text).forEach((column, columnIndex) => {
     const x = layer.x + layer.size / 2 - columnAdvance * columnIndex;
     for (const [charIndex, char] of [...column].entries()) {
-      const offset = getVerticalGlyphOffset(char, layer.size);
-      ctx.fillText(char, x + offset.x, layer.y + charAdvance * charIndex + offset.y);
+      drawVerticalGlyph(ctx, char, x, layer.y + charAdvance * charIndex, layer.size);
     }
   });
 }
