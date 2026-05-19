@@ -324,25 +324,46 @@ function drawLayerOnCanvas(ctx, layer) {
   ctx.textBaseline = 'top';
   ctx.font = `${layer.size}px '${layer.font}', sans-serif`;
 
+  // DOM 表示と一致させるため、要素の content box の位置を画像座標で取得する。
+  // (CSS の padding / border / 行ボックス内の半行送りを反映)
+  const containerRect = els.layerContainer.getBoundingClientRect();
+  const scale = state.imageNaturalWidth / containerRect.width;
+  const elRect = layer.el.getBoundingClientRect();
+  const style = window.getComputedStyle(layer.el);
+  const padLeft = parseFloat(style.paddingLeft) || 0;
+  const padTop = parseFloat(style.paddingTop) || 0;
+  const padRight = parseFloat(style.paddingRight) || 0;
+  const bdLeft = parseFloat(style.borderLeftWidth) || 0;
+  const bdTop = parseFloat(style.borderTopWidth) || 0;
+  const bdRight = parseFloat(style.borderRightWidth) || 0;
+
+  const contentLeft = ((elRect.left - containerRect.left) + bdLeft + padLeft) * scale;
+  const contentTop = ((elRect.top - containerRect.top) + bdTop + padTop) * scale;
+  const contentRight = ((elRect.right - containerRect.left) - bdRight - padRight) * scale;
+
   const lines = String(layer.text).split('\n');
-  const lineGap = layer.size * layer.lineHeight;
+  const halfLeading = layer.size * (layer.lineHeight - 1) / 2;
+  const colGap = layer.size * layer.lineHeight;
 
   if (layer.orientation === 'vertical') {
-    // 縦書き: 列ごとに右から左へ
-    let colX = layer.x;
+    // writing-mode: vertical-rl では最初の列が content box の右端。
+    // 列の line box 幅 = size × line-height、EM box はその中央に置かれるので
+    // 最初の列のグリフ左端 = contentRight - halfLeading - 1em。
+    // 列内のグリフ送りは 1em、列間は line-height。
+    let colX = contentRight - halfLeading - layer.size;
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li];
-      let y = layer.y;
+      let y = contentTop;
       for (const ch of Array.from(line)) {
         ctx.fillText(ch, colX, y);
-        y += lineGap;
+        y += layer.size;
       }
-      colX -= lineGap;
+      colX -= colGap;
     }
   } else {
-    // 横書き
+    // 横書き: line box の上端から halfLeading 下に EM box が来る。
     for (let i = 0; i < lines.length; i++) {
-      ctx.fillText(lines[i], layer.x, layer.y + i * lineGap);
+      ctx.fillText(lines[i], contentLeft, contentTop + halfLeading + i * colGap);
     }
   }
   ctx.restore();
