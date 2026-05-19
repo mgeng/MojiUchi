@@ -209,6 +209,36 @@ els.stageWrapper.addEventListener('click', (e) => {
   }
 });
 
+// 矢印キーで選択中レイヤーを1pxずつ移動(微調整)
+const ARROW_DELTAS = {
+  ArrowLeft: { dx: -1, dy: 0 },
+  ArrowRight: { dx: 1, dy: 0 },
+  ArrowUp: { dx: 0, dy: -1 },
+  ArrowDown: { dx: 0, dy: 1 },
+};
+
+document.addEventListener('keydown', (e) => {
+  const delta = ARROW_DELTAS[e.key];
+  if (!delta) return;
+
+  const layer = getSelectedLayer();
+  if (!layer) return;
+
+  // フォーム要素や本文編集中はネイティブの矢印キー動作を優先
+  const active = document.activeElement;
+  if (active) {
+    const tag = active.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (active.isContentEditable) return;
+  }
+
+  e.preventDefault();
+  layer.x += delta.dx;
+  layer.y += delta.dy;
+  applyLayerStyle(layer);
+  renderTextPreview();
+});
+
 function getSelectedLayer() {
   return state.layers.find((l) => l.id === state.selectedId) || null;
 }
