@@ -39,6 +39,25 @@ header h1 {
   gap: 8px;
 }
 
+.page-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-nav {
+  padding: 6px 10px;
+  min-width: 36px;
+}
+
+.page-indicator {
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+  text-align: center;
+  color: #333;
+  font-size: 14px;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;

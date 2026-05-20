@@ -55,6 +55,9 @@ const els = {
   memoClose: document.getElementById('memoClose'),
   memoText: document.getElementById('memoText'),
   saveProjectBtn: document.getElementById('saveProjectBtn'),
+  prevPageBtn: document.getElementById('prevPageBtn'),
+  nextPageBtn: document.getElementById('nextPageBtn'),
+  pageIndicator: document.getElementById('pageIndicator'),
 };
 
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|avif|svg)$/i;
@@ -89,16 +92,81 @@ function openFile(file) {
   }
 }
 
+const MAX_PAGES = 4;
+
+function createEmptyPage() {
+  return {
+    imageLoaded: false,
+    imageNaturalWidth: 0,
+    imageNaturalHeight: 0,
+    imageBlob: null,
+    imageName: '',
+    imageDataUrl: '',
+    layers: [], // { id, el, x, y, text, font, size, orientation, lineHeight }
+    selectedId: null,
+    nextId: 1,
+  };
+}
+
 const state = {
-  imageLoaded: false,
-  imageNaturalWidth: 0,
-  imageNaturalHeight: 0,
-  imageBlob: null,
-  imageName: '',
-  layers: [], // { id, el, x, y, text, font, size, orientation, lineHeight }
-  selectedId: null,
-  nextId: 1,
+  pages: Array.from({ length: MAX_PAGES }, createEmptyPage),
+  currentPageIndex: 0,
 };
+
+let cur = state.pages[0];
+
+function anyPageHasImage() {
+  return state.pages.some((p) => p.imageLoaded);
+}
+
+function updatePageIndicator() {
+  els.pageIndicator.textContent = `${state.currentPageIndex + 1} / ${state.pages.length}`;
+  els.prevPageBtn.disabled = state.currentPageIndex === 0;
+  els.nextPageBtn.disabled = state.currentPageIndex === state.pages.length - 1;
+}
+
+// 表示中ページの画像・レイヤー・有効状態をいまの cur に同期する。
+// ページ切替時と一括読み込み(.mj)後の初期表示の両方から使う。
+function refreshPageView() {
+  if (cur.imageLoaded && cur.imageDataUrl) {
+    if (els.baseImage.getAttribute('src') !== cur.imageDataUrl) {
+      els.baseImage.src = cur.imageDataUrl;
+    }
+    els.dropHint.hidden = true;
+    els.stage.hidden = false;
+    els.exportBtn.disabled = false;
+  } else {
+    els.baseImage.removeAttribute('src');
+    els.dropHint.hidden = false;
+    els.stage.hidden = true;
+    els.exportBtn.disabled = true;
+  }
+  els.saveProjectBtn.disabled = !anyPageHasImage();
+  // 現在ページのレイヤー DOM を layerContainer に並べ直す
+  for (const l of cur.layers) {
+    if (l.el.parentNode !== els.layerContainer) {
+      els.layerContainer.appendChild(l.el);
+    }
+  }
+  applyAllLayerStyles();
+  updateInspector();
+}
+
+function switchToPage(index) {
+  if (index < 0 || index >= state.pages.length) return;
+  if (index === state.currentPageIndex) return;
+  // いまのページのレイヤー DOM を退避(削除はしない、要素は残す)
+  for (const l of cur.layers) l.el.remove();
+  state.currentPageIndex = index;
+  cur = state.pages[index];
+  refreshPageView();
+  updatePageIndicator();
+}
+
+els.prevPageBtn.addEventListener('click', () => switchToPage(state.currentPageIndex - 1));
+els.nextPageBtn.addEventListener('click', () => switchToPage(state.currentPageIndex + 1));
+
+updatePageIndicator();
 
 function populateFontSelect() {
   els.propFont.innerHTML = '';
@@ -137,34 +205,42 @@ els.stageWrapper.addEventListener('drop', (e) => {
   if (file) openFile(file);
 });
 
-function loadImageFile(file) {
-  state.imageBlob = file;
-  state.imageName = file.name || 'image';
+function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
     reader.onerror = () => reject(reader.error || new Error('画像の読み込みに失敗しました'));
-    reader.onload = (ev) => {
-      els.baseImage.onload = () => {
-        state.imageLoaded = true;
-        state.imageNaturalWidth = els.baseImage.naturalWidth;
-        state.imageNaturalHeight = els.baseImage.naturalHeight;
-        els.dropHint.hidden = true;
-        els.stage.hidden = false;
-        els.exportBtn.disabled = false;
-        els.saveProjectBtn.disabled = false;
-        // 既存レイヤーをクリア
-        state.layers.forEach((l) => l.el.remove());
-        state.layers = [];
-        state.selectedId = null;
-        renderTextPreview();
-        updateInspector();
-        resolve();
-      };
-      els.baseImage.onerror = () => reject(new Error('画像のデコードに失敗しました'));
-      els.baseImage.src = ev.target.result;
-    };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
+}
+
+function getImageNaturalSize(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => reject(new Error('画像のデコードに失敗しました'));
+    img.src = dataUrl;
+  });
+}
+
+async function loadImageBlobToPage(page, blob, name) {
+  page.imageBlob = blob;
+  page.imageName = name || 'image';
+  page.imageDataUrl = await blobToDataUrl(blob);
+  const sz = await getImageNaturalSize(page.imageDataUrl);
+  page.imageNaturalWidth = sz.width;
+  page.imageNaturalHeight = sz.height;
+  page.imageLoaded = true;
+  // 既存レイヤーをクリア(画像差し替え扱い)
+  for (const l of page.layers) l.el.remove();
+  page.layers = [];
+  page.selectedId = null;
+  page.nextId = 1;
+}
+
+async function loadImageFile(file) {
+  await loadImageBlobToPage(cur, file, file.name);
+  refreshPageView();
 }
 
 // --- テキスト追加(ステージクリック) ---
@@ -174,15 +250,15 @@ els.layerContainer.addEventListener('click', (e) => {
   if (e.target !== els.layerContainer) return;
   const rect = els.layerContainer.getBoundingClientRect();
   // 表示座標 → 画像ネイティブ座標
-  const scaleX = state.imageNaturalWidth / rect.width;
-  const scaleY = state.imageNaturalHeight / rect.height;
+  const scaleX = cur.imageNaturalWidth / rect.width;
+  const scaleY = cur.imageNaturalHeight / rect.height;
   const x = (e.clientX - rect.left) * scaleX;
   const y = (e.clientY - rect.top) * scaleY;
   addTextLayer({ x, y });
 });
 
-function addTextLayer({ x, y, text = 'テキスト', font, size, orientation, lineHeight }) {
-  const id = state.nextId++;
+function addTextLayer({ x, y, text = 'テキスト', font, size, orientation, lineHeight }, targetPage = cur) {
+  const id = targetPage.nextId++;
   const layer = {
     id,
     text,
@@ -198,15 +274,16 @@ function addTextLayer({ x, y, text = 'テキスト', font, size, orientation, li
   el.className = 'text-layer';
   el.dataset.id = String(id);
   el.textContent = text;
-  els.layerContainer.appendChild(el);
   layer.el = el;
-  state.layers.push(layer);
+  targetPage.layers.push(layer);
 
   attachLayerHandlers(layer);
-  applyLayerStyle(layer);
-  renderTextPreview();
-
-  selectLayer(id);
+  if (targetPage === cur) {
+    els.layerContainer.appendChild(el);
+    applyLayerStyle(layer);
+    renderTextPreview();
+    selectLayer(id);
+  }
 }
 
 // --- レイヤーのドラッグ・選択・編集 ---
@@ -220,8 +297,8 @@ function attachLayerHandlers(layer) {
     selectLayer(layer.id);
 
     const rect = els.layerContainer.getBoundingClientRect();
-    const scaleX = state.imageNaturalWidth / rect.width;
-    const scaleY = state.imageNaturalHeight / rect.height;
+    const scaleX = cur.imageNaturalWidth / rect.width;
+    const scaleY = cur.imageNaturalHeight / rect.height;
     const startX = e.clientX;
     const startY = e.clientY;
     const origLayerX = layer.x;
@@ -280,16 +357,16 @@ function enterEditMode(layer) {
 }
 
 function selectLayer(id) {
-  state.selectedId = id;
-  state.layers.forEach((l) => {
+  cur.selectedId = id;
+  cur.layers.forEach((l) => {
     l.el.classList.toggle('selected', l.id === id);
   });
   updateInspector();
 }
 
 function deselect() {
-  state.selectedId = null;
-  state.layers.forEach((l) => l.el.classList.remove('selected'));
+  cur.selectedId = null;
+  cur.layers.forEach((l) => l.el.classList.remove('selected'));
   updateInspector();
 }
 
@@ -319,7 +396,7 @@ function isEditableTarget() {
 
 function deleteLayer(layer) {
   layer.el.remove();
-  state.layers = state.layers.filter((l) => l.id !== layer.id);
+  cur.layers = cur.layers.filter((l) => l.id !== layer.id);
   renderTextPreview();
   deselect();
 }
@@ -346,7 +423,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 function getSelectedLayer() {
-  return state.layers.find((l) => l.id === state.selectedId) || null;
+  return cur.layers.find((l) => l.id === cur.selectedId) || null;
 }
 
 // --- スタイル反映 ---
@@ -355,7 +432,7 @@ function applyLayerStyle(layer) {
   const el = layer.el;
   // 画像ネイティブ座標 → 表示座標
   const displayWidth = els.baseImage.clientWidth;
-  const scale = displayWidth / state.imageNaturalWidth;
+  const scale = displayWidth / cur.imageNaturalWidth;
   const bounds = measureTextLayerBounds(layer);
   el.style.left = `${(layer.x + bounds.x) * scale}px`;
   el.style.top = `${(layer.y + bounds.y) * scale}px`;
@@ -368,7 +445,7 @@ function applyLayerStyle(layer) {
 }
 
 function applyAllLayerStyles() {
-  state.layers.forEach(applyLayerStyle);
+  cur.layers.forEach(applyLayerStyle);
   renderTextPreview();
 }
 
@@ -451,7 +528,7 @@ els.propDelete.addEventListener('click', () => {
 
 async function ensureExportFontsReady() {
   const usedFonts = new Set();
-  for (const layer of state.layers) {
+  for (const layer of cur.layers) {
     if (FONT_FILES[layer.font]) usedFonts.add(layer.font);
   }
   if (!document.fonts) return;
@@ -525,13 +602,13 @@ function measureTextLayerBounds(layer) {
 }
 
 function syncPreviewCanvasSize() {
-  if (!state.imageLoaded) {
+  if (!cur.imageLoaded) {
     previewCanvas.width = 0;
     previewCanvas.height = 0;
     return false;
   }
-  previewCanvas.width = state.imageNaturalWidth;
-  previewCanvas.height = state.imageNaturalHeight;
+  previewCanvas.width = cur.imageNaturalWidth;
+  previewCanvas.height = cur.imageNaturalHeight;
   previewCanvas.style.width = `${els.baseImage.clientWidth}px`;
   previewCanvas.style.height = `${els.baseImage.clientHeight}px`;
   return previewCanvas.width > 0 && previewCanvas.height > 0;
@@ -541,7 +618,7 @@ function renderTextPreview() {
   if (!syncPreviewCanvasSize()) return;
   const ctx = previewCanvas.getContext('2d');
   ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-  state.layers.forEach((layer) => {
+  cur.layers.forEach((layer) => {
     if (!layer.el.classList.contains('editing')) {
       drawTextLayer(ctx, layer);
     }
@@ -627,14 +704,14 @@ async function saveBlob(blob, suggestedName, { description, mimeType, extension 
 
 const PROJECT_VERSION = 1;
 
-function buildProjectData() {
+function buildProjectData(page = cur) {
   return {
     version: PROJECT_VERSION,
     image: {
-      width: state.imageNaturalWidth,
-      height: state.imageNaturalHeight,
+      width: page.imageNaturalWidth,
+      height: page.imageNaturalHeight,
     },
-    layers: state.layers.map((l) => ({
+    layers: page.layers.map((l) => ({
       text: l.text,
       x: l.x,
       y: l.y,
@@ -646,11 +723,11 @@ function buildProjectData() {
   };
 }
 
-function applyProjectData(data) {
-  state.layers.forEach((l) => l.el.remove());
-  state.layers = [];
-  state.selectedId = null;
-  state.nextId = 1;
+function applyProjectData(data, targetPage = cur) {
+  for (const l of targetPage.layers) l.el.remove();
+  targetPage.layers = [];
+  targetPage.selectedId = null;
+  targetPage.nextId = 1;
   for (const l of data.layers) {
     addTextLayer({
       x: Number(l.x) || 0,
@@ -660,9 +737,9 @@ function applyProjectData(data) {
       size: typeof l.size === 'number' ? l.size : undefined,
       orientation: l.orientation,
       lineHeight: typeof l.lineHeight === 'number' ? l.lineHeight : undefined,
-    });
+    }, targetPage);
   }
-  deselect();
+  if (targetPage === cur) deselect();
 }
 
 function imageExtensionFromName(name) {
@@ -670,14 +747,20 @@ function imageExtensionFromName(name) {
   return m ? m[0].toLowerCase() : '.png';
 }
 
+const BUNDLE_VERSION = 2;
+
 async function buildBundleBlob() {
   if (typeof JSZip === 'undefined') throw new Error('JSZip ライブラリが読み込まれていません');
   const zip = new JSZip();
-  if (state.imageBlob) {
-    const ext = imageExtensionFromName(state.imageName);
-    zip.file(BUNDLE_IMAGE_PREFIX + ext, state.imageBlob);
-  }
-  zip.file(BUNDLE_TEXT_NAME, JSON.stringify(buildProjectData(), null, 2));
+  zip.file('manifest.json', JSON.stringify({ version: BUNDLE_VERSION, pages: state.pages.length }));
+  state.pages.forEach((page, i) => {
+    const idx = i + 1;
+    if (page.imageBlob) {
+      const ext = imageExtensionFromName(page.imageName);
+      zip.file(`pages/${idx}/${BUNDLE_IMAGE_PREFIX}${ext}`, page.imageBlob);
+    }
+    zip.file(`pages/${idx}/${BUNDLE_TEXT_NAME}`, JSON.stringify(buildProjectData(page), null, 2));
+  });
   const memo = els.memoText.value || '';
   if (memo.length > 0) {
     zip.file(BUNDLE_MEMO_NAME, memo);
@@ -686,7 +769,7 @@ async function buildBundleBlob() {
 }
 
 els.saveProjectBtn.addEventListener('click', async () => {
-  if (!state.imageLoaded) return;
+  if (!anyPageHasImage()) return;
   els.saveProjectBtn.disabled = true;
   try {
     const blob = await buildBundleBlob();
@@ -699,9 +782,39 @@ els.saveProjectBtn.addEventListener('click', async () => {
     console.error(err);
     alert('保存に失敗しました: ' + (err && err.message ? err.message : err));
   } finally {
-    els.saveProjectBtn.disabled = false;
+    els.saveProjectBtn.disabled = !anyPageHasImage();
   }
 });
+
+function resetAllPagesForBundle() {
+  // 表示中ページの DOM をクリア
+  for (const l of cur.layers) l.el.remove();
+  // 全ページを空に置き換え
+  for (let i = 0; i < state.pages.length; i++) {
+    state.pages[i] = createEmptyPage();
+  }
+  state.currentPageIndex = 0;
+  cur = state.pages[0];
+}
+
+async function loadPageFromBundle(pageIndex, imageEntry, textEntry) {
+  const page = state.pages[pageIndex];
+  if (imageEntry) {
+    const imgBlob = await imageEntry.async('blob');
+    const name = imageEntry.name.split('/').pop();
+    await loadImageBlobToPage(page, imgBlob, name);
+  }
+  if (textEntry) {
+    try {
+      const data = JSON.parse(await textEntry.async('string'));
+      if (data && Array.isArray(data.layers)) {
+        applyProjectData(data, page);
+      }
+    } catch (err) {
+      console.warn(`pages/${pageIndex + 1}/text.json の展開に失敗:`, err);
+    }
+  }
+}
 
 async function loadBundleFile(file) {
   if (typeof JSZip === 'undefined') {
@@ -716,34 +829,53 @@ async function loadBundleFile(file) {
     return;
   }
 
-  if (state.imageLoaded && !confirm('現在の画像・テキスト・メモをすべて置き換えます。よろしいですか?')) return;
+  if (anyPageHasImage() && !confirm('現在のページ・テキスト・メモをすべて置き換えます。よろしいですか?')) return;
 
-  let imageEntry = null;
+  // 新形式(pages/N/...)を検出
+  const pageEntries = []; // index → { imageEntry, textEntry }
+  for (let i = 0; i < MAX_PAGES; i++) {
+    pageEntries.push({ imageEntry: null, textEntry: null });
+  }
+  let hasNewFormat = false;
   zip.forEach((path, entry) => {
-    if (!imageEntry && !entry.dir && IMAGE_EXT_RE.test(path)) imageEntry = entry;
+    if (entry.dir) return;
+    const m = path.match(/^pages\/(\d+)\/(.+)$/);
+    if (!m) return;
+    const idx = parseInt(m[1], 10) - 1;
+    if (idx < 0 || idx >= MAX_PAGES) return;
+    const name = m[2];
+    if (IMAGE_EXT_RE.test(name)) {
+      pageEntries[idx].imageEntry = entry;
+      hasNewFormat = true;
+    } else if (name === BUNDLE_TEXT_NAME) {
+      pageEntries[idx].textEntry = entry;
+      hasNewFormat = true;
+    }
   });
 
-  if (imageEntry) {
-    try {
-      const imgBlob = await imageEntry.async('blob');
-      const imgFile = new File([imgBlob], imageEntry.name, { type: imgBlob.type || '' });
-      await loadImageFile(imgFile);
-    } catch (err) {
-      alert('画像の展開に失敗しました: ' + (err && err.message ? err.message : err));
-      return;
-    }
+  // 旧形式(ルートに image.* と text.json)の場合はページ 1 として扱う
+  if (!hasNewFormat) {
+    let oldImage = null;
+    zip.forEach((path, entry) => {
+      if (entry.dir) return;
+      if (path.includes('/')) return;
+      if (!oldImage && IMAGE_EXT_RE.test(path)) oldImage = entry;
+    });
+    pageEntries[0] = {
+      imageEntry: oldImage,
+      textEntry: zip.file(BUNDLE_TEXT_NAME),
+    };
   }
 
-  const textEntry = zip.file(BUNDLE_TEXT_NAME);
-  if (textEntry) {
+  resetAllPagesForBundle();
+
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const { imageEntry, textEntry } = pageEntries[i];
+    if (!imageEntry && !textEntry) continue;
     try {
-      const json = await textEntry.async('string');
-      const data = JSON.parse(json);
-      if (data && Array.isArray(data.layers)) {
-        applyProjectData(data);
-      }
+      await loadPageFromBundle(i, imageEntry, textEntry);
     } catch (err) {
-      console.warn('text.json の展開に失敗:', err);
+      console.warn(`ページ ${i + 1} の展開に失敗:`, err);
     }
   }
 
@@ -759,10 +891,13 @@ async function loadBundleFile(file) {
   } else {
     els.memoText.value = '';
   }
+
+  refreshPageView();
+  updatePageIndicator();
 }
 
 function loadProjectFile(file) {
-  if (!state.imageLoaded) {
+  if (!cur.imageLoaded) {
     alert('テキストデータを読み込む前に、画像を開いてください。');
     return;
   }
@@ -779,10 +914,10 @@ function loadProjectFile(file) {
       alert('テキストデータが見つかりません。');
       return;
     }
-    if (state.layers.length > 0 && !confirm('既存のテキストをすべて置き換えます。よろしいですか?')) return;
-    if (data.image && (data.image.width !== state.imageNaturalWidth || data.image.height !== state.imageNaturalHeight)) {
+    if (cur.layers.length > 0 && !confirm('既存のテキストをすべて置き換えます。よろしいですか?')) return;
+    if (data.image && (data.image.width !== cur.imageNaturalWidth || data.image.height !== cur.imageNaturalHeight)) {
       const ok = confirm(
-        `画像サイズが保存時と異なります(保存: ${data.image.width}x${data.image.height} / 現在: ${state.imageNaturalWidth}x${state.imageNaturalHeight})。\n位置がずれる可能性があります。続行しますか?`
+        `画像サイズが保存時と異なります(保存: ${data.image.width}x${data.image.height} / 現在: ${cur.imageNaturalWidth}x${cur.imageNaturalHeight})。\n位置がずれる可能性があります。続行しますか?`
       );
       if (!ok) return;
     }
@@ -846,20 +981,20 @@ els.memoHeader.addEventListener('mousedown', (e) => {
 });
 
 els.exportBtn.addEventListener('click', async () => {
-  if (!state.imageLoaded) return;
+  if (!cur.imageLoaded) return;
   els.exportBtn.disabled = true;
   try {
     await ensureExportFontsReady();
 
     const canvas = document.createElement('canvas');
-    canvas.width = state.imageNaturalWidth;
-    canvas.height = state.imageNaturalHeight;
+    canvas.width = cur.imageNaturalWidth;
+    canvas.height = cur.imageNaturalHeight;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(els.baseImage, 0, 0, canvas.width, canvas.height);
-    state.layers.forEach((layer) => drawTextLayer(ctx, layer));
+    cur.layers.forEach((layer) => drawTextLayer(ctx, layer));
 
     const pngBlob = await canvasToPngBlob(canvas);
-    await saveBlob(pngBlob, 'mojiuchi.png', {
+    await saveBlob(pngBlob, `mojiuchi-p${state.currentPageIndex + 1}.png`, {
       description: 'PNG画像',
       mimeType: 'image/png',
       extension: '.png',
@@ -868,6 +1003,6 @@ els.exportBtn.addEventListener('click', async () => {
     console.error(err);
     alert('PNG 書き出しに失敗しました: ' + (err && err.message ? err.message : err));
   } finally {
-    els.exportBtn.disabled = false;
+    els.exportBtn.disabled = !cur.imageLoaded;
   }
 });
