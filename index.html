@@ -11,11 +11,9 @@
     <h1>漫画吹き出し文字入れツール</h1>
     <div class="header-actions">
       <label class="btn">
-        画像を開く
-        <input type="file" id="fileInput" accept="image/*" hidden />
+        開く
+        <input type="file" id="fileInput" accept="image/*,.json,.txt,application/json,text/plain" hidden />
       </label>
-      <button id="loadProjectBtn" class="btn" disabled>テキスト読み込み</button>
-      <input id="loadProjectInput" type="file" accept=".json,application/json" hidden />
       <button id="saveProjectBtn" class="btn" disabled>テキスト保存</button>
       <button id="exportBtn" class="btn" disabled>PNG書き出し</button>
       <button id="memoToggle" class="btn">メモ</button>
@@ -26,10 +24,6 @@
     <div id="memoHeader" class="memo-header">
       <span class="memo-title">メモ</span>
       <div class="memo-actions">
-        <label class="memo-open-btn" title="テキストファイルを開く">
-          開く
-          <input type="file" id="memoFileInput" accept=".txt,text/plain" hidden />
-        </label>
         <button id="memoClose" class="memo-close" aria-label="閉じる" title="閉じる">×</button>
       </div>
     </div>
@@ -39,7 +33,7 @@
   <main id="app">
     <section id="stageWrapper" class="stage-wrapper">
       <div id="dropHint" class="drop-hint">
-        ここに画像をドラッグ&ドロップ、または「画像を開く」から選択
+        ここに画像 / テキスト(.json) / メモ(.txt)をドラッグ&ドロップ、または「開く」から選択
       </div>
       <div id="stage" class="stage" hidden>
         <img id="baseImage" alt="" />

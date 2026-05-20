@@ -54,11 +54,33 @@ const els = {
   memoHeader: document.getElementById('memoHeader'),
   memoClose: document.getElementById('memoClose'),
   memoText: document.getElementById('memoText'),
-  memoFileInput: document.getElementById('memoFileInput'),
   saveProjectBtn: document.getElementById('saveProjectBtn'),
-  loadProjectBtn: document.getElementById('loadProjectBtn'),
-  loadProjectInput: document.getElementById('loadProjectInput'),
 };
+
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|avif|svg)$/i;
+
+function detectFileKind(file) {
+  const name = file.name || '';
+  const type = file.type || '';
+  if (type.startsWith('image/') || IMAGE_EXT_RE.test(name)) return 'image';
+  if (type === 'application/json' || /\.json$/i.test(name)) return 'project';
+  if (type.startsWith('text/') || /\.txt$/i.test(name)) return 'memo';
+  return null;
+}
+
+function openFile(file) {
+  if (!file) return;
+  const kind = detectFileKind(file);
+  if (kind === 'image') {
+    loadImageFile(file);
+  } else if (kind === 'project') {
+    loadProjectFile(file);
+  } else if (kind === 'memo') {
+    loadMemoFile(file);
+  } else {
+    alert(`対応していないファイル形式です: ${file.name}`);
+  }
+}
 
 const state = {
   imageLoaded: false,
@@ -88,7 +110,7 @@ els.layerContainer.prepend(previewCanvas);
 
 els.fileInput.addEventListener('change', (e) => {
   const file = e.target.files && e.target.files[0];
-  if (file) loadImageFile(file);
+  if (file) openFile(file);
   els.fileInput.value = '';
 });
 
@@ -103,7 +125,7 @@ els.stageWrapper.addEventListener('drop', (e) => {
   e.preventDefault();
   els.stageWrapper.classList.remove('dragover');
   const file = e.dataTransfer.files && e.dataTransfer.files[0];
-  if (file && file.type.startsWith('image/')) loadImageFile(file);
+  if (file) openFile(file);
 });
 
 function loadImageFile(file) {
@@ -117,7 +139,6 @@ function loadImageFile(file) {
       els.stage.hidden = false;
       els.exportBtn.disabled = false;
       els.saveProjectBtn.disabled = false;
-      els.loadProjectBtn.disabled = false;
       // 既存レイヤーをクリア
       state.layers.forEach((l) => l.el.remove());
       state.layers = [];
@@ -566,6 +587,26 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// 保存ダイアログで場所を選んで書き出す(未対応ブラウザはダウンロードフォルダへ)
+async function saveBlob(blob, suggestedName, { description, mimeType, extension }) {
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{ description, accept: { [mimeType]: [extension] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return; // ユーザーキャンセル
+      console.warn('showSaveFilePicker が使えなかったので通常ダウンロードに切り替えます:', err);
+    }
+  }
+  downloadBlob(blob, suggestedName);
+}
+
 // --- プロジェクト保存・読み込み(テキストレイヤー) ---
 
 const PROJECT_VERSION = 1;
@@ -608,22 +649,22 @@ function applyProjectData(data) {
   deselect();
 }
 
-els.saveProjectBtn.addEventListener('click', () => {
+els.saveProjectBtn.addEventListener('click', async () => {
   if (!state.imageLoaded) return;
   const json = JSON.stringify(buildProjectData(), null, 2);
   const blob = new Blob([json], { type: 'application/json' });
-  downloadBlob(blob, 'mojiuchi-text.json');
+  await saveBlob(blob, 'mojiuchi-text.json', {
+    description: 'テキストデータ',
+    mimeType: 'application/json',
+    extension: '.json',
+  });
 });
 
-els.loadProjectBtn.addEventListener('click', () => {
-  if (!state.imageLoaded) return;
-  els.loadProjectInput.click();
-});
-
-els.loadProjectInput.addEventListener('change', (e) => {
-  const file = e.target.files && e.target.files[0];
-  els.loadProjectInput.value = '';
-  if (!file) return;
+function loadProjectFile(file) {
+  if (!state.imageLoaded) {
+    alert('テキストデータを読み込む前に、画像を開いてください。');
+    return;
+  }
   const reader = new FileReader();
   reader.onload = (ev) => {
     let data;
@@ -647,7 +688,7 @@ els.loadProjectInput.addEventListener('change', (e) => {
     applyProjectData(data);
   };
   reader.readAsText(file);
-});
+}
 
 // --- メモパネル(付箋風フローティング) ---
 
@@ -658,10 +699,7 @@ els.memoClose.addEventListener('click', () => {
   els.memoPanel.hidden = true;
 });
 
-els.memoFileInput.addEventListener('change', (e) => {
-  const file = e.target.files && e.target.files[0];
-  els.memoFileInput.value = '';
-  if (!file) return;
+function loadMemoFile(file) {
   if (els.memoText.value.trim() && !confirm('現在のメモを上書きします。よろしいですか?')) return;
   const reader = new FileReader();
   reader.onload = (ev) => {
@@ -674,9 +712,10 @@ els.memoFileInput.addEventListener('change', (e) => {
       text = new TextDecoder('shift_jis').decode(buf);
     }
     els.memoText.value = text;
+    els.memoPanel.hidden = false;
   };
   reader.readAsArrayBuffer(file);
-});
+}
 
 els.memoHeader.addEventListener('mousedown', (e) => {
   if (e.target.closest('.memo-actions')) return;
@@ -719,7 +758,11 @@ els.exportBtn.addEventListener('click', async () => {
     state.layers.forEach((layer) => drawTextLayer(ctx, layer));
 
     const pngBlob = await canvasToPngBlob(canvas);
-    downloadBlob(pngBlob, 'mojiuchi.png');
+    await saveBlob(pngBlob, 'mojiuchi.png', {
+      description: 'PNG画像',
+      mimeType: 'image/png',
+      extension: '.png',
+    });
   } catch (err) {
     console.error(err);
     alert('PNG 書き出しに失敗しました: ' + (err && err.message ? err.message : err));

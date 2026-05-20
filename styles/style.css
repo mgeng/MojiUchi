@@ -284,25 +284,6 @@ header h1 {
   gap: 4px;
 }
 
-.memo-open-btn {
-  display: inline-flex;
-  align-items: center;
-  background: transparent;
-  border: 1px solid #2a6df4;
-  color: #2a6df4;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 3px;
-  cursor: pointer;
-  font-family: inherit;
-  user-select: none;
-}
-
-.memo-open-btn:hover {
-  background: #2a6df4;
-  color: #fff;
-}
-
 .memo-close {
   background: transparent;
   border: none;
