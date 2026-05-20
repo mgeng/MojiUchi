@@ -58,6 +58,7 @@ const els = {
   prevPageBtn: document.getElementById('prevPageBtn'),
   nextPageBtn: document.getElementById('nextPageBtn'),
   pageIndicator: document.getElementById('pageIndicator'),
+  deletePageBtn: document.getElementById('deletePageBtn'),
 };
 
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|avif|svg)$/i;
@@ -119,6 +120,10 @@ function anyPageHasImage() {
   return state.pages.some((p) => p.imageLoaded);
 }
 
+function isPageEmpty(page) {
+  return !page.imageLoaded && page.layers.length === 0;
+}
+
 function updatePageIndicator() {
   els.pageIndicator.textContent = `${state.currentPageIndex + 1} / ${state.pages.length}`;
   els.prevPageBtn.disabled = state.currentPageIndex === 0;
@@ -142,6 +147,7 @@ function refreshPageView() {
     els.exportBtn.disabled = true;
   }
   els.saveProjectBtn.disabled = !anyPageHasImage();
+  els.deletePageBtn.disabled = isPageEmpty(cur);
   // 現在ページのレイヤー DOM を layerContainer に並べ直す
   for (const l of cur.layers) {
     if (l.el.parentNode !== els.layerContainer) {
@@ -165,6 +171,15 @@ function switchToPage(index) {
 
 els.prevPageBtn.addEventListener('click', () => switchToPage(state.currentPageIndex - 1));
 els.nextPageBtn.addEventListener('click', () => switchToPage(state.currentPageIndex + 1));
+
+els.deletePageBtn.addEventListener('click', () => {
+  if (isPageEmpty(cur)) return;
+  if (!confirm(`ページ ${state.currentPageIndex + 1} の画像とテキストを消去します。よろしいですか?`)) return;
+  for (const l of cur.layers) l.el.remove();
+  state.pages[state.currentPageIndex] = createEmptyPage();
+  cur = state.pages[state.currentPageIndex];
+  refreshPageView();
+});
 
 updatePageIndicator();
 
