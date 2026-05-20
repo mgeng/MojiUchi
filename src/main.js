@@ -58,10 +58,15 @@ const els = {
 };
 
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|avif|svg)$/i;
+const BUNDLE_EXT = '.mj';
+const BUNDLE_IMAGE_PREFIX = 'image';
+const BUNDLE_TEXT_NAME = 'text.json';
+const BUNDLE_MEMO_NAME = 'memo.txt';
 
 function detectFileKind(file) {
   const name = file.name || '';
   const type = file.type || '';
+  if (/\.mj$/i.test(name)) return 'bundle';
   if (type.startsWith('image/') || IMAGE_EXT_RE.test(name)) return 'image';
   if (type === 'application/json' || /\.json$/i.test(name)) return 'project';
   if (type.startsWith('text/') || /\.txt$/i.test(name)) return 'memo';
@@ -73,6 +78,8 @@ function openFile(file) {
   const kind = detectFileKind(file);
   if (kind === 'image') {
     loadImageFile(file);
+  } else if (kind === 'bundle') {
+    loadBundleFile(file);
   } else if (kind === 'project') {
     loadProjectFile(file);
   } else if (kind === 'memo') {
@@ -86,6 +93,8 @@ const state = {
   imageLoaded: false,
   imageNaturalWidth: 0,
   imageNaturalHeight: 0,
+  imageBlob: null,
+  imageName: '',
   layers: [], // { id, el, x, y, text, font, size, orientation, lineHeight }
   selectedId: null,
   nextId: 1,
@@ -129,26 +138,33 @@ els.stageWrapper.addEventListener('drop', (e) => {
 });
 
 function loadImageFile(file) {
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    els.baseImage.onload = () => {
-      state.imageLoaded = true;
-      state.imageNaturalWidth = els.baseImage.naturalWidth;
-      state.imageNaturalHeight = els.baseImage.naturalHeight;
-      els.dropHint.hidden = true;
-      els.stage.hidden = false;
-      els.exportBtn.disabled = false;
-      els.saveProjectBtn.disabled = false;
-      // 既存レイヤーをクリア
-      state.layers.forEach((l) => l.el.remove());
-      state.layers = [];
-      state.selectedId = null;
-      renderTextPreview();
-      updateInspector();
+  state.imageBlob = file;
+  state.imageName = file.name || 'image';
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error('画像の読み込みに失敗しました'));
+    reader.onload = (ev) => {
+      els.baseImage.onload = () => {
+        state.imageLoaded = true;
+        state.imageNaturalWidth = els.baseImage.naturalWidth;
+        state.imageNaturalHeight = els.baseImage.naturalHeight;
+        els.dropHint.hidden = true;
+        els.stage.hidden = false;
+        els.exportBtn.disabled = false;
+        els.saveProjectBtn.disabled = false;
+        // 既存レイヤーをクリア
+        state.layers.forEach((l) => l.el.remove());
+        state.layers = [];
+        state.selectedId = null;
+        renderTextPreview();
+        updateInspector();
+        resolve();
+      };
+      els.baseImage.onerror = () => reject(new Error('画像のデコードに失敗しました'));
+      els.baseImage.src = ev.target.result;
     };
-    els.baseImage.src = ev.target.result;
-  };
-  reader.readAsDataURL(file);
+    reader.readAsDataURL(file);
+  });
 }
 
 // --- テキスト追加(ステージクリック) ---
@@ -649,16 +665,101 @@ function applyProjectData(data) {
   deselect();
 }
 
+function imageExtensionFromName(name) {
+  const m = String(name || '').match(IMAGE_EXT_RE);
+  return m ? m[0].toLowerCase() : '.png';
+}
+
+async function buildBundleBlob() {
+  if (typeof JSZip === 'undefined') throw new Error('JSZip ライブラリが読み込まれていません');
+  const zip = new JSZip();
+  if (state.imageBlob) {
+    const ext = imageExtensionFromName(state.imageName);
+    zip.file(BUNDLE_IMAGE_PREFIX + ext, state.imageBlob);
+  }
+  zip.file(BUNDLE_TEXT_NAME, JSON.stringify(buildProjectData(), null, 2));
+  const memo = els.memoText.value || '';
+  if (memo.length > 0) {
+    zip.file(BUNDLE_MEMO_NAME, memo);
+  }
+  return zip.generateAsync({ type: 'blob', compression: 'STORE' });
+}
+
 els.saveProjectBtn.addEventListener('click', async () => {
   if (!state.imageLoaded) return;
-  const json = JSON.stringify(buildProjectData(), null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
-  await saveBlob(blob, 'mojiuchi-text.json', {
-    description: 'テキストデータ',
-    mimeType: 'application/json',
-    extension: '.json',
-  });
+  els.saveProjectBtn.disabled = true;
+  try {
+    const blob = await buildBundleBlob();
+    await saveBlob(blob, 'mojiuchi.mj', {
+      description: 'MojiUchi プロジェクト',
+      mimeType: 'application/zip',
+      extension: BUNDLE_EXT,
+    });
+  } catch (err) {
+    console.error(err);
+    alert('保存に失敗しました: ' + (err && err.message ? err.message : err));
+  } finally {
+    els.saveProjectBtn.disabled = false;
+  }
 });
+
+async function loadBundleFile(file) {
+  if (typeof JSZip === 'undefined') {
+    alert('JSZip ライブラリが読み込まれていません');
+    return;
+  }
+  let zip;
+  try {
+    zip = await JSZip.loadAsync(file);
+  } catch (err) {
+    alert('.mj ファイルの読み込みに失敗しました: ' + (err && err.message ? err.message : err));
+    return;
+  }
+
+  if (state.imageLoaded && !confirm('現在の画像・テキスト・メモをすべて置き換えます。よろしいですか?')) return;
+
+  let imageEntry = null;
+  zip.forEach((path, entry) => {
+    if (!imageEntry && !entry.dir && IMAGE_EXT_RE.test(path)) imageEntry = entry;
+  });
+
+  if (imageEntry) {
+    try {
+      const imgBlob = await imageEntry.async('blob');
+      const imgFile = new File([imgBlob], imageEntry.name, { type: imgBlob.type || '' });
+      await loadImageFile(imgFile);
+    } catch (err) {
+      alert('画像の展開に失敗しました: ' + (err && err.message ? err.message : err));
+      return;
+    }
+  }
+
+  const textEntry = zip.file(BUNDLE_TEXT_NAME);
+  if (textEntry) {
+    try {
+      const json = await textEntry.async('string');
+      const data = JSON.parse(json);
+      if (data && Array.isArray(data.layers)) {
+        applyProjectData(data);
+      }
+    } catch (err) {
+      console.warn('text.json の展開に失敗:', err);
+    }
+  }
+
+  const memoEntry = zip.file(BUNDLE_MEMO_NAME);
+  if (memoEntry) {
+    try {
+      const memo = await memoEntry.async('string');
+      els.memoText.value = memo;
+      if (memo.trim().length > 0) els.memoPanel.hidden = false;
+    } catch (err) {
+      console.warn('memo.txt の展開に失敗:', err);
+    }
+  } else {
+    els.memoText.value = '';
+  }
+}
 
 function loadProjectFile(file) {
   if (!state.imageLoaded) {

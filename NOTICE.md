@@ -9,6 +9,13 @@
 - ライセンス: [MIT License](./LICENSE)
 - 著作権: Copyright (c) 2026 maogeng
 
+## 同梱ライブラリ (JSZip)
+
+- 対象ファイル: `assets/vendor/jszip.min.js`
+- バージョン: 3.10.1
+- 配布元: <https://stuk.github.io/jszip/>
+- ライセンス: MIT License (Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso)
+
 ## 同梱フォント (源暎アンチック Pv6 / Nv6)
 
 - 対象ファイル:

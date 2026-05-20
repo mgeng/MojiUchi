@@ -12,9 +12,9 @@
     <div class="header-actions">
       <label class="btn">
         開く
-        <input type="file" id="fileInput" accept="image/*,.json,.txt,application/json,text/plain" hidden />
+        <input type="file" id="fileInput" accept="image/*,.json,.txt,.mj,application/json,text/plain" hidden />
       </label>
-      <button id="saveProjectBtn" class="btn" disabled>テキスト保存</button>
+      <button id="saveProjectBtn" class="btn" disabled>保存</button>
       <button id="exportBtn" class="btn" disabled>PNG書き出し</button>
       <button id="memoToggle" class="btn">メモ</button>
     </div>
@@ -33,7 +33,7 @@
   <main id="app">
     <section id="stageWrapper" class="stage-wrapper">
       <div id="dropHint" class="drop-hint">
-        ここに画像 / テキスト(.json) / メモ(.txt)をドラッグ&ドロップ、または「開く」から選択
+        ここに画像 / プロジェクト(.mj) / テキスト(.json) / メモ(.txt)をドラッグ&ドロップ、または「開く」から選択
       </div>
       <div id="stage" class="stage" hidden>
         <img id="baseImage" alt="" />
@@ -87,6 +87,7 @@
     </aside>
   </main>
 
+  <script src="assets/vendor/jszip.min.js" defer></script>
   <script src="src/main.js" defer></script>
 </body>
 </html>
