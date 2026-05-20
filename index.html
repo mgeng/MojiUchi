@@ -50,7 +50,7 @@
     <aside id="inspector" class="inspector">
       <div class="inspector-section">
         <h2>操作</h2>
-        <p class="hint">画像の好きな位置をクリックすると文字を追加できます。</p>
+        <p class="hint">画像上で右クリック → 「テキストを追加」で文字を追加。左クリックは選択のみ(何もない場所をクリックすると画像が選択され、Delete で画像のみ削除(テキストは保持))。</p>
       </div>
 
       <div class="inspector-section" id="textProps" hidden>
@@ -92,6 +92,10 @@
       </div>
     </aside>
   </main>
+
+  <div id="contextMenu" class="context-menu" hidden>
+    <button type="button" class="context-menu-item" data-action="add-text">テキストを追加</button>
+  </div>
 
   <script src="assets/vendor/jszip.min.js" defer></script>
   <script src="src/main.js" defer></script>

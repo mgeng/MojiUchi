@@ -59,7 +59,10 @@ const els = {
   nextPageBtn: document.getElementById('nextPageBtn'),
   pageIndicator: document.getElementById('pageIndicator'),
   deletePageBtn: document.getElementById('deletePageBtn'),
+  contextMenu: document.getElementById('contextMenu'),
 };
+
+const IMAGE_SELECTION = 'image';
 
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|avif|svg)$/i;
 const BUNDLE_EXT = '.mj';
@@ -148,6 +151,7 @@ function refreshPageView() {
   }
   els.saveProjectBtn.disabled = !anyPageHasImage();
   els.deletePageBtn.disabled = isPageEmpty(cur);
+  els.stage.classList.toggle('image-selected', cur.selectedId === IMAGE_SELECTION && cur.imageLoaded);
   // 現在ページのレイヤー DOM を layerContainer に並べ直す
   for (const l of cur.layers) {
     if (l.el.parentNode !== els.layerContainer) {
@@ -239,6 +243,9 @@ function getImageNaturalSize(dataUrl) {
 }
 
 async function loadImageBlobToPage(page, blob, name) {
+  // 既に画像があるページに別画像を開く場合は画像差し替えとして既存レイヤーをクリア。
+  // 画像が無いページ(新規 or 画像削除後)では既存テキストを保持して載せ替える。
+  const hadImage = page.imageLoaded;
   page.imageBlob = blob;
   page.imageName = name || 'image';
   page.imageDataUrl = await blobToDataUrl(blob);
@@ -246,11 +253,12 @@ async function loadImageBlobToPage(page, blob, name) {
   page.imageNaturalWidth = sz.width;
   page.imageNaturalHeight = sz.height;
   page.imageLoaded = true;
-  // 既存レイヤーをクリア(画像差し替え扱い)
-  for (const l of page.layers) l.el.remove();
-  page.layers = [];
-  page.selectedId = null;
-  page.nextId = 1;
+  if (hadImage) {
+    for (const l of page.layers) l.el.remove();
+    page.layers = [];
+    page.selectedId = null;
+    page.nextId = 1;
+  }
 }
 
 async function loadImageFile(file) {
@@ -258,18 +266,70 @@ async function loadImageFile(file) {
   refreshPageView();
 }
 
-// --- テキスト追加(ステージクリック) ---
+// --- ステージ上の選択 / 右クリックメニュー ---
 
+// 何もないところを左クリックしたら画像を選択
 els.layerContainer.addEventListener('click', (e) => {
-  // 子テキストレイヤーがクリックされたときは新規追加しない
   if (e.target !== els.layerContainer) return;
+  if (!cur.imageLoaded) return;
+  selectImage();
+});
+
+// クリック位置(画像ネイティブ座標)を覚えておき、メニューの「テキストを追加」で使う
+let contextMenuTargetCoords = { x: 0, y: 0 };
+
+els.layerContainer.addEventListener('contextmenu', (e) => {
+  if (!cur.imageLoaded) return;
+  e.preventDefault();
   const rect = els.layerContainer.getBoundingClientRect();
-  // 表示座標 → 画像ネイティブ座標
   const scaleX = cur.imageNaturalWidth / rect.width;
   const scaleY = cur.imageNaturalHeight / rect.height;
-  const x = (e.clientX - rect.left) * scaleX;
-  const y = (e.clientY - rect.top) * scaleY;
-  addTextLayer({ x, y });
+  contextMenuTargetCoords = {
+    x: (e.clientX - rect.left) * scaleX,
+    y: (e.clientY - rect.top) * scaleY,
+  };
+  showContextMenu(e.clientX, e.clientY);
+});
+
+function showContextMenu(clientX, clientY) {
+  els.contextMenu.style.left = `${clientX}px`;
+  els.contextMenu.style.top = `${clientY}px`;
+  els.contextMenu.hidden = false;
+  // 画面外にはみ出していたら寄せる
+  const rect = els.contextMenu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) {
+    els.contextMenu.style.left = `${Math.max(0, window.innerWidth - rect.width - 4)}px`;
+  }
+  if (rect.bottom > window.innerHeight) {
+    els.contextMenu.style.top = `${Math.max(0, window.innerHeight - rect.height - 4)}px`;
+  }
+}
+
+function hideContextMenu() {
+  els.contextMenu.hidden = true;
+}
+
+els.contextMenu.addEventListener('click', (e) => {
+  const item = e.target.closest('.context-menu-item');
+  if (!item) return;
+  const action = item.dataset.action;
+  hideContextMenu();
+  if (action === 'add-text') {
+    addTextLayer({ x: contextMenuTargetCoords.x, y: contextMenuTargetCoords.y });
+  }
+});
+
+// メニュー外のマウスダウンで閉じる(キャプチャ段階で他の stopPropagation より先に拾う)
+document.addEventListener('mousedown', (e) => {
+  if (els.contextMenu.hidden) return;
+  if (els.contextMenu.contains(e.target)) return;
+  hideContextMenu();
+}, true);
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !els.contextMenu.hidden) {
+    hideContextMenu();
+  }
 });
 
 function addTextLayer({ x, y, text = 'テキスト', font, size, orientation, lineHeight }, targetPage = cur) {
@@ -307,6 +367,7 @@ function attachLayerHandlers(layer) {
   const el = layer.el;
 
   el.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return; // 左クリックのみドラッグ開始
     if (el.classList.contains('editing')) return;
     e.stopPropagation();
     selectLayer(layer.id);
@@ -376,13 +437,26 @@ function selectLayer(id) {
   cur.layers.forEach((l) => {
     l.el.classList.toggle('selected', l.id === id);
   });
+  els.stage.classList.remove('image-selected');
+  updateInspector();
+}
+
+function selectImage() {
+  cur.selectedId = IMAGE_SELECTION;
+  cur.layers.forEach((l) => l.el.classList.remove('selected'));
+  els.stage.classList.add('image-selected');
   updateInspector();
 }
 
 function deselect() {
   cur.selectedId = null;
   cur.layers.forEach((l) => l.el.classList.remove('selected'));
+  els.stage.classList.remove('image-selected');
   updateInspector();
+}
+
+function isImageSelected() {
+  return cur.selectedId === IMAGE_SELECTION;
 }
 
 // 画像外をクリックしたら選択解除
@@ -416,10 +490,31 @@ function deleteLayer(layer) {
   deselect();
 }
 
+function deleteCurrentImage() {
+  if (!cur.imageLoaded) return;
+  // 画像のみクリアし、テキストレイヤー(およびそれが依存する画像ネイティブ寸法)は保持する。
+  // 同じサイズの画像を再度開けば元の位置で文字が復活する。
+  cur.imageLoaded = false;
+  cur.imageBlob = null;
+  cur.imageName = '';
+  cur.imageDataUrl = '';
+  if (cur.selectedId === IMAGE_SELECTION) cur.selectedId = null;
+  refreshPageView();
+}
+
 document.addEventListener('keydown', (e) => {
+  if (isEditableTarget()) return;
+
+  if (isImageSelected()) {
+    if (e.key === 'Delete') {
+      e.preventDefault();
+      deleteCurrentImage();
+    }
+    return;
+  }
+
   const layer = getSelectedLayer();
   if (!layer) return;
-  if (isEditableTarget()) return;
 
   const delta = ARROW_DELTAS[e.key];
   if (delta) {
