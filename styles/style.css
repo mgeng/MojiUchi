@@ -220,6 +220,13 @@ header h1 {
   text-orientation: upright;
 }
 
+/* 非編集時は Canvas が白枠を描くので DOM 側は透明のままにし、
+   編集中だけ DOM に白背景と枠線を出して contentEditable のテキストを見せる */
+.text-layer.monologue.editing {
+  background: #fff;
+  box-shadow: inset 0 0 0 2px #000;
+}
+
 .inspector {
   background: #fff;
   border-left: 1px solid #ddd;

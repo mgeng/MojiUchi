@@ -64,6 +64,9 @@ const els = {
 
 const IMAGE_SELECTION = 'image';
 
+const MONOLOGUE_PADDING = 12;
+const MONOLOGUE_BORDER = 2;
+
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|avif|svg)$/i;
 const BUNDLE_EXT = '.mj';
 const BUNDLE_IMAGE_PREFIX = 'image';
@@ -316,6 +319,8 @@ els.contextMenu.addEventListener('click', (e) => {
   hideContextMenu();
   if (action === 'add-text') {
     addTextLayer({ x: contextMenuTargetCoords.x, y: contextMenuTargetCoords.y });
+  } else if (action === 'add-monologue') {
+    addTextLayer({ x: contextMenuTargetCoords.x, y: contextMenuTargetCoords.y, kind: 'monologue' });
   }
 });
 
@@ -332,7 +337,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-function addTextLayer({ x, y, text = 'テキスト', font, size, orientation, lineHeight }, targetPage = cur) {
+function addTextLayer({ x, y, text = 'テキスト', font, size, orientation, lineHeight, kind = 'text' }, targetPage = cur) {
   const id = targetPage.nextId++;
   const layer = {
     id,
@@ -343,10 +348,12 @@ function addTextLayer({ x, y, text = 'テキスト', font, size, orientation, li
     size: size ?? 24,
     orientation: orientation || 'horizontal',
     lineHeight: lineHeight ?? 1.1,
+    kind,
     el: null,
   };
   const el = document.createElement('div');
   el.className = 'text-layer';
+  if (kind === 'monologue') el.classList.add('monologue');
   el.dataset.id = String(id);
   el.textContent = text;
   layer.el = el;
@@ -551,7 +558,9 @@ function applyLayerStyle(layer) {
   el.style.fontFamily = `'${layer.font}', sans-serif`;
   el.style.fontSize = `${layer.size * scale}px`;
   el.style.lineHeight = String(layer.lineHeight);
+  el.style.padding = layer.kind === 'monologue' ? `${MONOLOGUE_PADDING * scale}px` : '';
   el.classList.toggle('vertical', layer.orientation === 'vertical');
+  el.classList.toggle('monologue', layer.kind === 'monologue');
 }
 
 function applyAllLayerStyles() {
@@ -685,16 +694,17 @@ function drawVerticalGlyph(ctx, char, x, y, size) {
 }
 
 function measureTextLayerBounds(layer) {
+  const padding = layer.kind === 'monologue' ? MONOLOGUE_PADDING : 0;
   const lines = splitTextLines(layer.text);
   const lineAdvance = layer.size * layer.lineHeight;
   if (layer.orientation === 'vertical') {
     const columns = Math.max(lines.length, 1);
     const rows = Math.max(...lines.map((line) => [...line].length), 1);
     return {
-      x: -lineAdvance * (columns - 1),
-      y: 0,
-      width: lineAdvance * (columns - 1) + layer.size,
-      height: lineAdvance * (rows - 1) + layer.size,
+      x: -lineAdvance * (columns - 1) - padding,
+      y: -padding,
+      width: lineAdvance * (columns - 1) + layer.size + padding * 2,
+      height: lineAdvance * (rows - 1) + layer.size + padding * 2,
     };
   }
 
@@ -704,10 +714,10 @@ function measureTextLayerBounds(layer) {
   setupTextContext(ctx, layer);
   const width = Math.max(...lines.map((line) => ctx.measureText(line).width), layer.size);
   return {
-    x: 0,
-    y: 0,
-    width,
-    height: Math.max(lines.length, 1) * lineAdvance,
+    x: -padding,
+    y: -padding,
+    width: width + padding * 2,
+    height: Math.max(lines.length, 1) * lineAdvance + padding * 2,
   };
 }
 
@@ -759,7 +769,22 @@ function drawVerticalTextLayer(ctx, layer) {
   });
 }
 
+function drawMonologueBox(ctx, layer) {
+  const bounds = measureTextLayerBounds(layer);
+  const x = layer.x + bounds.x;
+  const y = layer.y + bounds.y;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(x, y, bounds.width, bounds.height);
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = MONOLOGUE_BORDER;
+  const inset = MONOLOGUE_BORDER / 2;
+  ctx.strokeRect(x + inset, y + inset, bounds.width - MONOLOGUE_BORDER, bounds.height - MONOLOGUE_BORDER);
+}
+
 function drawTextLayer(ctx, layer) {
+  if (layer.kind === 'monologue') {
+    drawMonologueBox(ctx, layer);
+  }
   if (layer.orientation === 'vertical') {
     drawVerticalTextLayer(ctx, layer);
   } else {
@@ -829,6 +854,7 @@ function buildProjectData(page = cur) {
       size: l.size,
       orientation: l.orientation,
       lineHeight: l.lineHeight,
+      kind: l.kind || 'text',
     })),
   };
 }
@@ -847,6 +873,7 @@ function applyProjectData(data, targetPage = cur) {
       size: typeof l.size === 'number' ? l.size : undefined,
       orientation: l.orientation,
       lineHeight: typeof l.lineHeight === 'number' ? l.lineHeight : undefined,
+      kind: l.kind === 'monologue' ? 'monologue' : 'text',
     }, targetPage);
   }
   if (targetPage === cur) deselect();
