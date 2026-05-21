@@ -52,6 +52,7 @@ const els = {
   memoToggle: document.getElementById('memoToggle'),
   memoPanel: document.getElementById('memoPanel'),
   memoHeader: document.getElementById('memoHeader'),
+  memoTitle: document.getElementById('memoTitle'),
   memoClose: document.getElementById('memoClose'),
   memoText: document.getElementById('memoText'),
   saveProjectBtn: document.getElementById('saveProjectBtn'),
@@ -112,6 +113,7 @@ function createEmptyPage() {
     layers: [], // { id, el, x, y, text, font, size, orientation, lineHeight }
     selectedId: null,
     nextId: 1,
+    memo: '',
   };
 }
 
@@ -134,6 +136,12 @@ function updatePageIndicator() {
   els.pageIndicator.textContent = `${state.currentPageIndex + 1} / ${state.pages.length}`;
   els.prevPageBtn.disabled = state.currentPageIndex === 0;
   els.nextPageBtn.disabled = state.currentPageIndex === state.pages.length - 1;
+  els.memoTitle.textContent = `メモ (P${state.currentPageIndex + 1})`;
+}
+
+// 現在ページの memo を textarea に反映
+function syncMemoFromPage() {
+  els.memoText.value = cur.memo || '';
 }
 
 // 表示中ページの画像・レイヤー・有効状態をいまの cur に同期する。
@@ -174,6 +182,7 @@ function switchToPage(index) {
   cur = state.pages[index];
   refreshPageView();
   updatePageIndicator();
+  syncMemoFromPage();
 }
 
 els.prevPageBtn.addEventListener('click', () => switchToPage(state.currentPageIndex - 1));
@@ -186,6 +195,7 @@ els.deletePageBtn.addEventListener('click', () => {
   state.pages[state.currentPageIndex] = createEmptyPage();
   cur = state.pages[state.currentPageIndex];
   refreshPageView();
+  syncMemoFromPage();
 });
 
 updatePageIndicator();
@@ -897,11 +907,11 @@ async function buildBundleBlob() {
       zip.file(`pages/${idx}/${BUNDLE_IMAGE_PREFIX}${ext}`, page.imageBlob);
     }
     zip.file(`pages/${idx}/${BUNDLE_TEXT_NAME}`, JSON.stringify(buildProjectData(page), null, 2));
+    const memo = page.memo || '';
+    if (memo.length > 0) {
+      zip.file(`pages/${idx}/${BUNDLE_MEMO_NAME}`, memo);
+    }
   });
-  const memo = els.memoText.value || '';
-  if (memo.length > 0) {
-    zip.file(BUNDLE_MEMO_NAME, memo);
-  }
   return zip.generateAsync({ type: 'blob', compression: 'STORE' });
 }
 
@@ -934,7 +944,7 @@ function resetAllPagesForBundle() {
   cur = state.pages[0];
 }
 
-async function loadPageFromBundle(pageIndex, imageEntry, textEntry) {
+async function loadPageFromBundle(pageIndex, imageEntry, textEntry, memoEntry) {
   const page = state.pages[pageIndex];
   if (imageEntry) {
     const imgBlob = await imageEntry.async('blob');
@@ -949,6 +959,13 @@ async function loadPageFromBundle(pageIndex, imageEntry, textEntry) {
       }
     } catch (err) {
       console.warn(`pages/${pageIndex + 1}/text.json の展開に失敗:`, err);
+    }
+  }
+  if (memoEntry) {
+    try {
+      page.memo = await memoEntry.async('string');
+    } catch (err) {
+      console.warn(`pages/${pageIndex + 1}/memo.txt の展開に失敗:`, err);
     }
   }
 }
@@ -969,9 +986,9 @@ async function loadBundleFile(file) {
   if (anyPageHasImage() && !confirm('現在のページ・テキスト・メモをすべて置き換えます。よろしいですか?')) return;
 
   // 新形式(pages/N/...)を検出
-  const pageEntries = []; // index → { imageEntry, textEntry }
+  const pageEntries = []; // index → { imageEntry, textEntry, memoEntry }
   for (let i = 0; i < MAX_PAGES; i++) {
-    pageEntries.push({ imageEntry: null, textEntry: null });
+    pageEntries.push({ imageEntry: null, textEntry: null, memoEntry: null });
   }
   let hasNewFormat = false;
   zip.forEach((path, entry) => {
@@ -987,6 +1004,9 @@ async function loadBundleFile(file) {
     } else if (name === BUNDLE_TEXT_NAME) {
       pageEntries[idx].textEntry = entry;
       hasNewFormat = true;
+    } else if (name === BUNDLE_MEMO_NAME) {
+      pageEntries[idx].memoEntry = entry;
+      hasNewFormat = true;
     }
   });
 
@@ -1001,36 +1021,36 @@ async function loadBundleFile(file) {
     pageEntries[0] = {
       imageEntry: oldImage,
       textEntry: zip.file(BUNDLE_TEXT_NAME),
+      memoEntry: null,
     };
+  }
+
+  // 旧形式のルート memo.txt はページ 1 のメモとして扱う(後方互換)
+  const rootMemoEntry = zip.file(BUNDLE_MEMO_NAME);
+  if (rootMemoEntry && !pageEntries[0].memoEntry) {
+    pageEntries[0].memoEntry = rootMemoEntry;
   }
 
   resetAllPagesForBundle();
 
   for (let i = 0; i < MAX_PAGES; i++) {
-    const { imageEntry, textEntry } = pageEntries[i];
-    if (!imageEntry && !textEntry) continue;
+    const { imageEntry, textEntry, memoEntry } = pageEntries[i];
+    if (!imageEntry && !textEntry && !memoEntry) continue;
     try {
-      await loadPageFromBundle(i, imageEntry, textEntry);
+      await loadPageFromBundle(i, imageEntry, textEntry, memoEntry);
     } catch (err) {
       console.warn(`ページ ${i + 1} の展開に失敗:`, err);
     }
   }
 
-  const memoEntry = zip.file(BUNDLE_MEMO_NAME);
-  if (memoEntry) {
-    try {
-      const memo = await memoEntry.async('string');
-      els.memoText.value = memo;
-      if (memo.trim().length > 0) els.memoPanel.hidden = false;
-    } catch (err) {
-      console.warn('memo.txt の展開に失敗:', err);
-    }
-  } else {
-    els.memoText.value = '';
+  // 現在ページ(P1)にメモがあればパネルを開く
+  if ((cur.memo || '').trim().length > 0) {
+    els.memoPanel.hidden = false;
   }
 
   refreshPageView();
   updatePageIndicator();
+  syncMemoFromPage();
 }
 
 function loadProjectFile(file) {
@@ -1072,8 +1092,13 @@ els.memoClose.addEventListener('click', () => {
   els.memoPanel.hidden = true;
 });
 
+// textarea への入力を現在ページのメモに反映
+els.memoText.addEventListener('input', () => {
+  cur.memo = els.memoText.value;
+});
+
 function loadMemoFile(file) {
-  if (els.memoText.value.trim() && !confirm('現在のメモを上書きします。よろしいですか?')) return;
+  if ((cur.memo || '').trim() && !confirm(`ページ ${state.currentPageIndex + 1} の現在のメモを上書きします。よろしいですか?`)) return;
   const reader = new FileReader();
   reader.onload = (ev) => {
     const buf = ev.target.result;
@@ -1084,6 +1109,7 @@ function loadMemoFile(file) {
       // UTF-8 として読めない場合は Shift_JIS にフォールバック
       text = new TextDecoder('shift_jis').decode(buf);
     }
+    cur.memo = text;
     els.memoText.value = text;
     els.memoPanel.hidden = false;
   };
