@@ -48,6 +48,9 @@ const els = {
   panelGutterValue: document.getElementById('panelGutterValue'),
   splitTopBottomBtn: document.getElementById('splitTopBottomBtn'),
   splitLeftRightBtn: document.getElementById('splitLeftRightBtn'),
+  panelMaterialProps: document.getElementById('panelMaterialProps'),
+  materialResetBtn: document.getElementById('materialResetBtn'),
+  materialRemoveBtn: document.getElementById('materialRemoveBtn'),
   textProps: document.getElementById('textProps'),
   propText: document.getElementById('propText'),
   propFont: document.getElementById('propFont'),
@@ -431,6 +434,21 @@ function findPanelAtClientPoint(clientX, clientY) {
   return cur.panels.find((p) => nx >= p.x && nx < p.x + p.w && ny >= p.y && ny < p.y + p.h) || null;
 }
 
+function openImagePickerForPanel(panel) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.addEventListener('change', () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    loadImageAsPanelMaterial(panel, file).catch((err) => {
+      console.error(err);
+      alert('素材の読み込みに失敗しました: ' + (err && err.message ? err.message : err));
+    });
+  });
+  input.click();
+}
+
 async function loadImageAsPanelMaterial(panel, blob) {
   const dataUrl = await blobToDataUrl(blob);
   const sz = await getImageNaturalSize(dataUrl);
@@ -484,6 +502,10 @@ function renderPanels() {
       e.stopPropagation();
       selectPanel(p.id);
     });
+    el.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      openImagePickerForPanel(p);
+    });
     // 選択中のコマだけがエッジドラッグ対応。ホバー中のカーソルを近接エッジに合わせて切替える。
     if (p.id === cur.selectedPanelId) {
       el.addEventListener('mousemove', (e) => {
@@ -530,9 +552,11 @@ function selectPanel(id) {
 }
 
 function updatePanelControls() {
-  const hasSelection = cur.selectedPanelId != null && cur.panels.some((p) => p.id === cur.selectedPanelId);
+  const sel = getSelectedPanel();
+  const hasSelection = sel != null;
   els.splitTopBottomBtn.disabled = !hasSelection;
   els.splitLeftRightBtn.disabled = !hasSelection;
+  els.panelMaterialProps.hidden = !(hasSelection && sel.material);
 }
 
 function getSelectedPanel() {
@@ -586,7 +610,14 @@ els.prevPageBtn.addEventListener('click', () => switchToPage(state.currentPageIn
 els.nextPageBtn.addEventListener('click', () => switchToPage(state.currentPageIndex + 1));
 
 els.templateSelect.addEventListener('change', () => {
-  applyTemplate(els.templateSelect.value);
+  const newTemplate = els.templateSelect.value;
+  if (newTemplate !== cur.template && cur.panels.some((p) => p.material)) {
+    if (!confirm('テンプレートを変更すると、各コマに配置した画像はすべて消えます。よろしいですか?')) {
+      els.templateSelect.value = cur.template;
+      return;
+    }
+  }
+  applyTemplate(newTemplate);
 });
 
 function applyPanelBorderWidth(px) {
@@ -610,6 +641,25 @@ els.panelGutterInput.addEventListener('input', () => {
 
 els.splitTopBottomBtn.addEventListener('click', () => splitSelectedPanel('topBottom'));
 els.splitLeftRightBtn.addEventListener('click', () => splitSelectedPanel('leftRight'));
+
+els.materialResetBtn.addEventListener('click', () => {
+  const sel = getSelectedPanel();
+  if (!sel || !sel.material) return;
+  sel.material.tx = 0;
+  sel.material.ty = 0;
+  sel.material.scale = 1;
+  sel.material.rotation = 0;
+  const el = els.panelContainer.querySelector(`[data-panel-id="${sel.id}"]`);
+  const img = el && el.querySelector('.panel-material');
+  if (img) applyMaterialTransform(img, sel, el);
+});
+
+els.materialRemoveBtn.addEventListener('click', () => {
+  const sel = getSelectedPanel();
+  if (!sel || !sel.material) return;
+  sel.material = null;
+  renderPanels();
+});
 
 applyPanelBorderWidth(Number(els.panelBorderInput.value));
 applyPanelGutter(Number(els.panelGutterInput.value));

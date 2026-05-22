@@ -208,7 +208,7 @@ header h1 {
 }
 
 .panel:not(.has-material)::before {
-  content: '画像をドロップ';
+  content: 'ドロップ / ダブルクリックで画像';
   color: #999;
   font-size: 12px;
   pointer-events: none;
