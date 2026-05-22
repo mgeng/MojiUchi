@@ -347,6 +347,24 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// Ctrl(または Cmd)+S/O/E のグローバルショートカット。
+// ブラウザ標準動作(ページ保存・ファイル選択)を抑止して各ボタンに割り当てる。
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (e.altKey || e.shiftKey) return;
+  const key = e.key.toLowerCase();
+  if (key === 's') {
+    e.preventDefault();
+    if (!els.saveProjectBtn.disabled) els.saveProjectBtn.click();
+  } else if (key === 'o') {
+    e.preventDefault();
+    els.fileInput.click();
+  } else if (key === 'e') {
+    e.preventDefault();
+    if (!els.exportBtn.disabled) els.exportBtn.click();
+  }
+});
+
 function addTextLayer({ x, y, text = 'テキスト', font, size, orientation, lineHeight, kind = 'text' }, targetPage = cur) {
   const id = targetPage.nextId++;
   const layer = {
@@ -522,6 +540,13 @@ function deleteCurrentImage() {
 document.addEventListener('keydown', (e) => {
   if (isEditableTarget()) return;
 
+  // Ctrl+←/→ でページ移動(選択状態に関係なく動作)
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    e.preventDefault();
+    switchToPage(state.currentPageIndex + (e.key === 'ArrowRight' ? 1 : -1));
+    return;
+  }
+
   if (isImageSelected()) {
     if (e.key === 'Delete') {
       e.preventDefault();
@@ -533,8 +558,19 @@ document.addEventListener('keydown', (e) => {
   const layer = getSelectedLayer();
   if (!layer) return;
 
+  // Ctrl+↑/↓ で文字サイズを変更(スライダーと同じ 8〜120 の範囲)
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    e.preventDefault();
+    const sizeDelta = e.key === 'ArrowUp' ? 1 : -1;
+    layer.size = Math.max(8, Math.min(120, layer.size + sizeDelta));
+    applyLayerStyle(layer);
+    renderTextPreview();
+    updateInspector();
+    return;
+  }
+
   const delta = ARROW_DELTAS[e.key];
-  if (delta) {
+  if (delta && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
     layer.x += delta.dx;
     layer.y += delta.dy;
