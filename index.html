@@ -13,12 +13,12 @@
       <button id="prevPageBtn" class="btn btn-nav" aria-label="前のページ" title="前のページ">◀</button>
       <span id="pageIndicator" class="page-indicator">1 / 4</span>
       <button id="nextPageBtn" class="btn btn-nav" aria-label="次のページ" title="次のページ">▶</button>
-      <button id="deletePageBtn" class="btn btn-danger" disabled title="現在のページの画像とテキストを消去">ページ削除</button>
+      <button id="deletePageBtn" class="btn btn-danger" disabled title="現在のページの内容を消去">ページ削除</button>
     </div>
     <div class="header-actions">
       <label class="btn">
         開く
-        <input type="file" id="fileInput" accept="image/*,.json,.txt,.mj,application/json,text/plain" hidden />
+        <input type="file" id="fileInput" accept=".txt,.mj,text/plain" hidden />
       </label>
       <button id="saveProjectBtn" class="btn" disabled>保存</button>
       <button id="exportBtn" class="btn" disabled>PNG書き出し</button>
@@ -38,11 +38,7 @@
 
   <main id="app">
     <section id="stageWrapper" class="stage-wrapper">
-      <div id="dropHint" class="drop-hint">
-        ここに画像 / プロジェクト(.mj) / テキスト(.json) / メモ(.txt)をドラッグ&ドロップ、または「開く」から選択
-      </div>
-      <div id="stage" class="stage" hidden>
-        <img id="baseImage" alt="" />
+      <div id="stage" class="stage">
         <div id="panelContainer" class="panel-container"></div>
         <div id="layerContainer" class="layer-container"></div>
       </div>
@@ -54,7 +50,6 @@
         <label class="field">
           <span>テンプレート</span>
           <select id="templateSelect">
-            <option value="none">なし</option>
             <option value="one">1コマ（全面）</option>
             <option value="splitV">縦2分割</option>
             <option value="splitH">横2分割</option>
@@ -92,7 +87,7 @@
 
       <div class="inspector-section">
         <h2>操作</h2>
-        <p class="hint">画像上で右クリック → 「テキストを追加」で文字を追加。左クリックは選択のみ(何もない場所をクリックすると画像が選択され、Delete で画像のみ削除(テキストは保持))。</p>
+        <p class="hint">ページ上で右クリック → 「テキストを追加」で文字を追加。コマに画像をドロップ / ダブルクリックで素材を配置。</p>
         <p class="hint">ショートカット: Ctrl+O 開く / Ctrl+S 保存 / Ctrl+E PNG書き出し / Ctrl+←→ ページ移動</p>
         <p class="hint">選択中: 矢印キーで1px移動 / Ctrl+↑↓ で文字サイズ変更</p>
       </div>

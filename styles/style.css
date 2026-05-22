@@ -108,19 +108,9 @@ header h1 {
   padding: 24px;
 }
 
-.drop-hint {
-  color: #ccc;
-  font-size: 14px;
-  border: 2px dashed #888;
-  padding: 48px 32px;
-  border-radius: 12px;
-  text-align: center;
-  pointer-events: none;
-}
-
-.stage-wrapper.dragover .drop-hint {
-  border-color: #fff;
-  color: #fff;
+.stage-wrapper.dragover {
+  outline: 2px dashed #fff;
+  outline-offset: -12px;
 }
 
 .stage {
@@ -129,11 +119,7 @@ header h1 {
   background: #fff;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
   line-height: 0;
-}
-
-.stage.image-selected {
-  outline: 3px solid #2a6df4;
-  outline-offset: 2px;
+  /* レイアウト寸法は main.js が cur.canvasWidth/Height をインライン style で px 指定する */
 }
 
 .context-menu {
@@ -163,13 +149,6 @@ header h1 {
 
 .context-menu-item:hover {
   background: #eef3ff;
-}
-
-.stage img {
-  display: block;
-  max-width: none;
-  user-select: none;
-  -webkit-user-drag: none;
 }
 
 .panel-container {
@@ -229,6 +208,13 @@ header h1 {
   position: absolute;
   inset: 0;
   line-height: normal;
+  /* stage を覆うが、空白部分はクリックを panel-container 側に通す。
+     テキストレイヤー本体は .text-layer 側で pointer-events: auto で受ける */
+  pointer-events: none;
+}
+
+.text-layer {
+  pointer-events: auto;
 }
 
 .text-preview-canvas {
