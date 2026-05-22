@@ -43,11 +43,38 @@
       </div>
       <div id="stage" class="stage" hidden>
         <img id="baseImage" alt="" />
+        <div id="panelContainer" class="panel-container"></div>
         <div id="layerContainer" class="layer-container"></div>
       </div>
     </section>
 
     <aside id="inspector" class="inspector">
+      <div class="inspector-section">
+        <h2>ページレイアウト</h2>
+        <label class="field">
+          <span>テンプレート</span>
+          <select id="templateSelect">
+            <option value="none">なし</option>
+            <option value="one">1コマ（全面）</option>
+            <option value="splitV">縦2分割</option>
+            <option value="splitH">横2分割</option>
+            <option value="fourKoma">4コマ縦</option>
+            <option value="six">6コマ（3段×2列）</option>
+            <option value="eight">8コマ（4段×2列）</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>輪郭線の太さ <small id="panelBorderValue">4</small>px</span>
+          <input type="range" id="panelBorderInput" min="1" max="12" step="1" value="4" />
+        </label>
+
+        <label class="field">
+          <span>コマ間の間隔 <small id="panelGutterValue">14</small>px</span>
+          <input type="range" id="panelGutterInput" min="0" max="40" step="1" value="14" />
+        </label>
+      </div>
+
       <div class="inspector-section">
         <h2>操作</h2>
         <p class="hint">画像上で右クリック → 「テキストを追加」で文字を追加。左クリックは選択のみ(何もない場所をクリックすると画像が選択され、Delete で画像のみ削除(テキストは保持))。</p>

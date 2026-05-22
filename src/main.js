@@ -40,6 +40,12 @@ const els = {
   stage: document.getElementById('stage'),
   baseImage: document.getElementById('baseImage'),
   layerContainer: document.getElementById('layerContainer'),
+  panelContainer: document.getElementById('panelContainer'),
+  templateSelect: document.getElementById('templateSelect'),
+  panelBorderInput: document.getElementById('panelBorderInput'),
+  panelBorderValue: document.getElementById('panelBorderValue'),
+  panelGutterInput: document.getElementById('panelGutterInput'),
+  panelGutterValue: document.getElementById('panelGutterValue'),
   textProps: document.getElementById('textProps'),
   propText: document.getElementById('propText'),
   propFont: document.getElementById('propFont'),
@@ -64,6 +70,49 @@ const els = {
 };
 
 const IMAGE_SELECTION = 'image';
+
+// コマ割りテンプレート。panels は 0-1 の正規化座標（{x,y,w,h}）。
+const TEMPLATES = {
+  none: { label: 'なし', panels: [] },
+  one: { label: '1コマ（全面）', panels: [
+    { x: 0, y: 0, w: 1, h: 1 },
+  ]},
+  splitV: { label: '縦2分割', panels: [
+    { x: 0, y: 0,   w: 1, h: 0.5 },
+    { x: 0, y: 0.5, w: 1, h: 0.5 },
+  ]},
+  splitH: { label: '横2分割', panels: [
+    { x: 0,   y: 0, w: 0.5, h: 1 },
+    { x: 0.5, y: 0, w: 0.5, h: 1 },
+  ]},
+  fourKoma: { label: '4コマ縦', panels: [
+    { x: 0, y: 0,    w: 1, h: 0.25 },
+    { x: 0, y: 0.25, w: 1, h: 0.25 },
+    { x: 0, y: 0.5,  w: 1, h: 0.25 },
+    { x: 0, y: 0.75, w: 1, h: 0.25 },
+  ]},
+  six: { label: '6コマ', panels: [
+    { x: 0,   y: 0,        w: 0.5, h: 1 / 3 },
+    { x: 0.5, y: 0,        w: 0.5, h: 1 / 3 },
+    { x: 0,   y: 1 / 3,    w: 0.5, h: 1 / 3 },
+    { x: 0.5, y: 1 / 3,    w: 0.5, h: 1 / 3 },
+    { x: 0,   y: 2 / 3,    w: 0.5, h: 1 / 3 },
+    { x: 0.5, y: 2 / 3,    w: 0.5, h: 1 / 3 },
+  ]},
+  eight: { label: '8コマ', panels: [
+    { x: 0,   y: 0,    w: 0.5, h: 0.25 },
+    { x: 0.5, y: 0,    w: 0.5, h: 0.25 },
+    { x: 0,   y: 0.25, w: 0.5, h: 0.25 },
+    { x: 0.5, y: 0.25, w: 0.5, h: 0.25 },
+    { x: 0,   y: 0.5,  w: 0.5, h: 0.25 },
+    { x: 0.5, y: 0.5,  w: 0.5, h: 0.25 },
+    { x: 0,   y: 0.75, w: 0.5, h: 0.25 },
+    { x: 0.5, y: 0.75, w: 0.5, h: 0.25 },
+  ]},
+};
+
+const DEFAULT_CANVAS_WIDTH = 1200;
+const DEFAULT_CANVAS_HEIGHT = 1700;
 
 const MONOLOGUE_PADDING = 12;
 const MONOLOGUE_BORDER = 2;
@@ -114,6 +163,11 @@ function createEmptyPage() {
     selectedId: null,
     nextId: 1,
     memo: '',
+    template: 'none',
+    panels: [], // { id, x, y, w, h } 0-1 正規化
+    nextPanelId: 1,
+    canvasWidth: DEFAULT_CANVAS_WIDTH,
+    canvasHeight: DEFAULT_CANVAS_HEIGHT,
   };
 }
 
@@ -128,8 +182,12 @@ function anyPageHasImage() {
   return state.pages.some((p) => p.imageLoaded);
 }
 
+function hasPageContent(page) {
+  return page.imageLoaded || page.template !== 'none';
+}
+
 function isPageEmpty(page) {
-  return !page.imageLoaded && page.layers.length === 0;
+  return !page.imageLoaded && page.layers.length === 0 && page.template === 'none';
 }
 
 function updatePageIndicator() {
@@ -147,22 +205,35 @@ function syncMemoFromPage() {
 // 表示中ページの画像・レイヤー・有効状態をいまの cur に同期する。
 // ページ切替時と一括読み込み(.mj)後の初期表示の両方から使う。
 function refreshPageView() {
+  const showStage = hasPageContent(cur);
   if (cur.imageLoaded && cur.imageDataUrl) {
     if (els.baseImage.getAttribute('src') !== cur.imageDataUrl) {
       els.baseImage.src = cur.imageDataUrl;
     }
-    els.dropHint.hidden = true;
-    els.stage.hidden = false;
-    els.exportBtn.disabled = false;
+    els.baseImage.hidden = false;
+    els.stage.style.width = '';
+    els.stage.style.height = '';
   } else {
     els.baseImage.removeAttribute('src');
-    els.dropHint.hidden = false;
-    els.stage.hidden = true;
-    els.exportBtn.disabled = true;
+    els.baseImage.hidden = true;
+    if (cur.template !== 'none') {
+      els.stage.style.width = `${cur.canvasWidth}px`;
+      els.stage.style.height = `${cur.canvasHeight}px`;
+    } else {
+      els.stage.style.width = '';
+      els.stage.style.height = '';
+    }
   }
+  els.stage.hidden = !showStage;
+  els.dropHint.hidden = showStage;
+  els.exportBtn.disabled = !cur.imageLoaded;
   els.saveProjectBtn.disabled = !anyPageHasImage();
   els.deletePageBtn.disabled = isPageEmpty(cur);
   els.stage.classList.toggle('image-selected', cur.selectedId === IMAGE_SELECTION && cur.imageLoaded);
+  // テキストレイヤーは画像座標に依存するため、画像が無い間は非表示にする（Phase 1 仕様）
+  els.layerContainer.hidden = !cur.imageLoaded;
+  renderPanels();
+  if (els.templateSelect) els.templateSelect.value = cur.template;
   // 現在ページのレイヤー DOM を layerContainer に並べ直す
   for (const l of cur.layers) {
     if (l.el.parentNode !== els.layerContainer) {
@@ -171,6 +242,33 @@ function refreshPageView() {
   }
   applyAllLayerStyles();
   updateInspector();
+}
+
+function renderPanels() {
+  els.panelContainer.innerHTML = '';
+  for (const p of cur.panels) {
+    const el = document.createElement('div');
+    el.className = 'panel';
+    el.dataset.panelId = String(p.id);
+    // 隣接コマ間にフル gutter、外周にはハーフ gutter の余白を取り、各コマが独立した箱に見えるようにする。
+    // gutter は CSS 変数経由なのでスライダー操作で再描画なしに反映される。
+    el.style.left = `calc(${p.x * 100}% + var(--panel-half-gutter))`;
+    el.style.top = `calc(${p.y * 100}% + var(--panel-half-gutter))`;
+    el.style.width = `calc(${p.w * 100}% - var(--panel-gutter))`;
+    el.style.height = `calc(${p.h * 100}% - var(--panel-gutter))`;
+    els.panelContainer.appendChild(el);
+  }
+}
+
+function applyTemplate(templateId) {
+  const tmpl = TEMPLATES[templateId];
+  if (!tmpl) return;
+  cur.template = templateId;
+  cur.panels = tmpl.panels.map((p) => ({
+    id: cur.nextPanelId++,
+    x: p.x, y: p.y, w: p.w, h: p.h,
+  }));
+  refreshPageView();
 }
 
 function switchToPage(index) {
@@ -187,6 +285,32 @@ function switchToPage(index) {
 
 els.prevPageBtn.addEventListener('click', () => switchToPage(state.currentPageIndex - 1));
 els.nextPageBtn.addEventListener('click', () => switchToPage(state.currentPageIndex + 1));
+
+els.templateSelect.addEventListener('change', () => {
+  applyTemplate(els.templateSelect.value);
+});
+
+function applyPanelBorderWidth(px) {
+  document.documentElement.style.setProperty('--panel-border-width', `${px}px`);
+  els.panelBorderValue.textContent = String(px);
+}
+
+function applyPanelGutter(px) {
+  document.documentElement.style.setProperty('--panel-gutter', `${px}px`);
+  document.documentElement.style.setProperty('--panel-half-gutter', `${px / 2}px`);
+  els.panelGutterValue.textContent = String(px);
+}
+
+els.panelBorderInput.addEventListener('input', () => {
+  applyPanelBorderWidth(Number(els.panelBorderInput.value));
+});
+
+els.panelGutterInput.addEventListener('input', () => {
+  applyPanelGutter(Number(els.panelGutterInput.value));
+});
+
+applyPanelBorderWidth(Number(els.panelBorderInput.value));
+applyPanelGutter(Number(els.panelGutterInput.value));
 
 els.deletePageBtn.addEventListener('click', () => {
   if (isPageEmpty(cur)) return;
@@ -593,6 +717,8 @@ function getSelectedLayer() {
 
 function applyLayerStyle(layer) {
   const el = layer.el;
+  // 画像が無いと座標基準が無いので何もしない（Phase 1 では layerContainer 自体も非表示）
+  if (!cur.imageLoaded || cur.imageNaturalWidth === 0) return;
   // 画像ネイティブ座標 → 表示座標
   const displayWidth = els.baseImage.clientWidth;
   const scale = displayWidth / cur.imageNaturalWidth;

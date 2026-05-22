@@ -172,6 +172,21 @@ header h1 {
   -webkit-user-drag: none;
 }
 
+.panel-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.panel {
+  position: absolute;
+  border: var(--panel-border-width, 4px) solid #000;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .layer-container {
   position: absolute;
   inset: 0;
