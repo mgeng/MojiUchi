@@ -1,4 +1,4 @@
-// 漫画吹き出し文字入れツール
+// Gina — 漫画オーサリングツール
 
 // --- フォント設定(ここを追記すれば select と書き出しの両方に反映) ---
 const FONTS = [
@@ -529,7 +529,13 @@ function renderPanels() {
 
 // 選択切替は DOM 再生成せず、.selected クラスの付け外しだけで済ませる。
 // renderPanels を呼ぶと dblclick イベントが成立しなくなるため。
+// 排他: テキスト選択は同時に解除（アプリ全体で選択オブジェクトは常に 1 つ）。
 function selectPanel(id) {
+  if (cur.selectedId != null) {
+    cur.selectedId = null;
+    cur.layers.forEach((l) => l.el.classList.remove('selected'));
+    updateInspector();
+  }
   if (cur.selectedPanelId === id) return;
   if (cur.selectedPanelId != null) {
     const prev = els.panelContainer.querySelector(`[data-panel-id="${cur.selectedPanelId}"]`);
@@ -935,7 +941,14 @@ function enterEditMode(layer) {
   layer.el.addEventListener('blur', finish);
 }
 
+// 排他: コマ選択は同時に解除（アプリ全体で選択オブジェクトは常に 1 つ）。
 function selectLayer(id) {
+  if (cur.selectedPanelId != null) {
+    const prev = els.panelContainer.querySelector(`[data-panel-id="${cur.selectedPanelId}"]`);
+    if (prev) prev.classList.remove('selected');
+    cur.selectedPanelId = null;
+    updatePanelControls();
+  }
   cur.selectedId = id;
   cur.layers.forEach((l) => {
     l.el.classList.toggle('selected', l.id === id);
@@ -1520,8 +1533,8 @@ els.saveProjectBtn.addEventListener('click', async () => {
   els.saveProjectBtn.disabled = true;
   try {
     const blob = await buildBundleBlob();
-    await saveBlob(blob, 'mojiuchi.mj', {
-      description: 'MojiUchi プロジェクト',
+    await saveBlob(blob, 'gina.mj', {
+      description: 'Gina プロジェクト',
       mimeType: 'application/zip',
       extension: BUNDLE_EXT,
     });
@@ -1768,7 +1781,7 @@ els.exportBtn.addEventListener('click', async () => {
     cur.layers.forEach((layer) => drawTextLayer(ctx, layer));
 
     const pngBlob = await canvasToPngBlob(canvas);
-    await saveBlob(pngBlob, `mojiuchi-p${state.currentPageIndex + 1}.png`, {
+    await saveBlob(pngBlob, `gina-p${state.currentPageIndex + 1}.png`, {
       description: 'PNG画像',
       mimeType: 'image/png',
       extension: '.png',
