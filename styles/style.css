@@ -184,7 +184,17 @@ header h1 {
   box-sizing: border-box;
   background: rgba(255, 255, 255, 0.02);
   overflow: hidden;
-  pointer-events: none;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.panel:hover {
+  background: rgba(42, 109, 244, 0.08);
+}
+
+.panel.selected {
+  border-color: #2a6df4;
+  background: rgba(42, 109, 244, 0.12);
 }
 
 .layer-container {

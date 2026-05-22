@@ -46,6 +46,8 @@ const els = {
   panelBorderValue: document.getElementById('panelBorderValue'),
   panelGutterInput: document.getElementById('panelGutterInput'),
   panelGutterValue: document.getElementById('panelGutterValue'),
+  splitTopBottomBtn: document.getElementById('splitTopBottomBtn'),
+  splitLeftRightBtn: document.getElementById('splitLeftRightBtn'),
   textProps: document.getElementById('textProps'),
   propText: document.getElementById('propText'),
   propFont: document.getElementById('propFont'),
@@ -166,6 +168,7 @@ function createEmptyPage() {
     template: 'none',
     panels: [], // { id, x, y, w, h } 0-1 正規化
     nextPanelId: 1,
+    selectedPanelId: null,
     canvasWidth: DEFAULT_CANVAS_WIDTH,
     canvasHeight: DEFAULT_CANVAS_HEIGHT,
   };
@@ -249,6 +252,7 @@ function renderPanels() {
   for (const p of cur.panels) {
     const el = document.createElement('div');
     el.className = 'panel';
+    if (p.id === cur.selectedPanelId) el.classList.add('selected');
     el.dataset.panelId = String(p.id);
     // 隣接コマ間にフル gutter、外周にはハーフ gutter の余白を取り、各コマが独立した箱に見えるようにする。
     // gutter は CSS 変数経由なのでスライダー操作で再描画なしに反映される。
@@ -256,8 +260,45 @@ function renderPanels() {
     el.style.top = `calc(${p.y * 100}% + var(--panel-half-gutter))`;
     el.style.width = `calc(${p.w * 100}% - var(--panel-gutter))`;
     el.style.height = `calc(${p.h * 100}% - var(--panel-gutter))`;
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectPanel(p.id);
+    });
     els.panelContainer.appendChild(el);
   }
+  updatePanelControls();
+}
+
+function selectPanel(id) {
+  cur.selectedPanelId = id;
+  renderPanels();
+}
+
+function updatePanelControls() {
+  const hasSelection = cur.selectedPanelId != null && cur.panels.some((p) => p.id === cur.selectedPanelId);
+  els.splitTopBottomBtn.disabled = !hasSelection;
+  els.splitLeftRightBtn.disabled = !hasSelection;
+}
+
+function getSelectedPanel() {
+  return cur.panels.find((p) => p.id === cur.selectedPanelId) || null;
+}
+
+function splitSelectedPanel(direction) {
+  const panel = getSelectedPanel();
+  if (!panel) return;
+  const idx = cur.panels.indexOf(panel);
+  let a, b;
+  if (direction === 'topBottom') {
+    a = { id: cur.nextPanelId++, x: panel.x, y: panel.y,             w: panel.w, h: panel.h / 2 };
+    b = { id: cur.nextPanelId++, x: panel.x, y: panel.y + panel.h / 2, w: panel.w, h: panel.h / 2 };
+  } else {
+    a = { id: cur.nextPanelId++, x: panel.x,             y: panel.y, w: panel.w / 2, h: panel.h };
+    b = { id: cur.nextPanelId++, x: panel.x + panel.w / 2, y: panel.y, w: panel.w / 2, h: panel.h };
+  }
+  cur.panels.splice(idx, 1, a, b);
+  cur.selectedPanelId = a.id;
+  renderPanels();
 }
 
 function applyTemplate(templateId) {
@@ -268,6 +309,7 @@ function applyTemplate(templateId) {
     id: cur.nextPanelId++,
     x: p.x, y: p.y, w: p.w, h: p.h,
   }));
+  cur.selectedPanelId = null;
   refreshPageView();
 }
 
@@ -308,6 +350,9 @@ els.panelBorderInput.addEventListener('input', () => {
 els.panelGutterInput.addEventListener('input', () => {
   applyPanelGutter(Number(els.panelGutterInput.value));
 });
+
+els.splitTopBottomBtn.addEventListener('click', () => splitSelectedPanel('topBottom'));
+els.splitLeftRightBtn.addEventListener('click', () => splitSelectedPanel('leftRight'));
 
 applyPanelBorderWidth(Number(els.panelBorderInput.value));
 applyPanelGutter(Number(els.panelGutterInput.value));
