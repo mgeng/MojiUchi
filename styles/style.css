@@ -197,6 +197,33 @@ header h1 {
   background: rgba(42, 109, 244, 0.12);
 }
 
+.panel.has-material {
+  background: #fff;
+}
+
+.panel:not(.has-material) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel:not(.has-material)::before {
+  content: '画像をドロップ';
+  color: #999;
+  font-size: 12px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.panel-material {
+  position: absolute;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  transform-origin: center;
+  max-width: none;
+}
+
 
 .layer-container {
   position: absolute;

@@ -373,8 +373,93 @@ function startEdgeDrag(panel, edge, startEvent) {
       else if (s.edge === 'bottom') p.h = newVal - s.oy;
       else { p.y = newVal; p.h = (s.oy + s.oh) - newVal; }
       const el = els.panelContainer.querySelector(`[data-panel-id="${s.panel.id}"]`);
-      if (el) applyPanelLayoutStyle(el, s.panel);
+      if (el) {
+        applyPanelLayoutStyle(el, s.panel);
+        const img = el.querySelector('.panel-material');
+        if (img) applyMaterialTransform(img, s.panel, el);
+      }
     }
+  };
+  const onUp = () => {
+    document.body.style.cursor = '';
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+// 素材 img を「コマ全体を覆う cover フィット」を基準に、user の tx/ty/scale/rotation で動かす。
+function applyMaterialTransform(img, panel, panelEl) {
+  const m = panel.material;
+  if (!m) return;
+  const pw = panelEl.clientWidth;
+  const ph = panelEl.clientHeight;
+  if (pw === 0 || ph === 0 || m.naturalWidth === 0 || m.naturalHeight === 0) return;
+  const coverScale = Math.max(pw / m.naturalWidth, ph / m.naturalHeight);
+  const finalW = m.naturalWidth * coverScale * (m.scale || 1);
+  const finalH = m.naturalHeight * coverScale * (m.scale || 1);
+  const cx = pw / 2 + (m.tx || 0) * pw;
+  const cy = ph / 2 + (m.ty || 0) * ph;
+  img.style.width = `${finalW}px`;
+  img.style.height = `${finalH}px`;
+  img.style.left = `${cx - finalW / 2}px`;
+  img.style.top = `${cy - finalH / 2}px`;
+  img.style.transform = `rotate(${m.rotation || 0}deg)`;
+}
+
+function mountMaterialOnPanel(panelEl, panel) {
+  if (!panel.material) return;
+  const img = document.createElement('img');
+  img.className = 'panel-material';
+  img.src = panel.material.src;
+  img.draggable = false;
+  panelEl.classList.add('has-material');
+  panelEl.appendChild(img);
+  // 画像 onload 後の natural size とコマレイアウトの両方が揃ってから transform 反映
+  applyMaterialTransform(img, panel, panelEl);
+  // 初回レンダ時にコマがまだ 0 サイズだったケースに備えて次フレームで再適用
+  requestAnimationFrame(() => applyMaterialTransform(img, panel, panelEl));
+}
+
+function findPanelAtClientPoint(clientX, clientY) {
+  if (cur.panels.length === 0) return null;
+  const rect = els.panelContainer.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return null;
+  const nx = (clientX - rect.left) / rect.width;
+  const ny = (clientY - rect.top) / rect.height;
+  return cur.panels.find((p) => nx >= p.x && nx < p.x + p.w && ny >= p.y && ny < p.y + p.h) || null;
+}
+
+async function loadImageAsPanelMaterial(panel, blob) {
+  const dataUrl = await blobToDataUrl(blob);
+  const sz = await getImageNaturalSize(dataUrl);
+  panel.material = {
+    src: dataUrl,
+    naturalWidth: sz.width,
+    naturalHeight: sz.height,
+    tx: 0, ty: 0,
+    scale: 1,
+    rotation: 0,
+  };
+  selectPanel(panel.id);
+}
+
+function startMaterialDrag(panel, panelEl, startEvent) {
+  startEvent.preventDefault();
+  startEvent.stopPropagation();
+  const startX = startEvent.clientX;
+  const startY = startEvent.clientY;
+  const pw = panelEl.clientWidth;
+  const ph = panelEl.clientHeight;
+  const origTx = panel.material.tx || 0;
+  const origTy = panel.material.ty || 0;
+  const img = panelEl.querySelector('.panel-material');
+  document.body.style.cursor = 'grabbing';
+  const onMove = (ev) => {
+    panel.material.tx = origTx + (ev.clientX - startX) / pw;
+    panel.material.ty = origTy + (ev.clientY - startY) / ph;
+    if (img) applyMaterialTransform(img, panel, panelEl);
   };
   const onUp = () => {
     document.body.style.cursor = '';
@@ -403,18 +488,38 @@ function renderPanels() {
     if (p.id === cur.selectedPanelId) {
       el.addEventListener('mousemove', (e) => {
         const hit = getEdgeFromPoint(el, p, e.clientX, e.clientY);
-        if (!hit) el.style.cursor = 'pointer';
-        else if (!hit.resizable) el.style.cursor = 'not-allowed';
-        else el.style.cursor = cursorForEdge(hit.edge);
+        if (hit && !hit.resizable) el.style.cursor = 'not-allowed';
+        else if (hit) el.style.cursor = cursorForEdge(hit.edge);
+        else if (p.material) el.style.cursor = 'grab';
+        else el.style.cursor = 'pointer';
       });
       el.addEventListener('mouseleave', () => { el.style.cursor = ''; });
       el.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         const hit = getEdgeFromPoint(el, p, e.clientX, e.clientY);
-        if (hit && hit.resizable) startEdgeDrag(p, hit.edge, e);
+        if (hit && hit.resizable) {
+          startEdgeDrag(p, hit.edge, e);
+        } else if (p.material) {
+          startMaterialDrag(p, el, e);
+        }
       });
+      // ホイールで拡縮、Shift+ホイールで回転
+      el.addEventListener('wheel', (e) => {
+        if (!p.material) return;
+        e.preventDefault();
+        const img = el.querySelector('.panel-material');
+        if (e.shiftKey) {
+          const step = e.deltaY < 0 ? -5 : 5;
+          p.material.rotation = ((p.material.rotation || 0) + step) % 360;
+        } else {
+          const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+          p.material.scale = Math.max(0.1, Math.min(10, (p.material.scale || 1) * factor));
+        }
+        if (img) applyMaterialTransform(img, p, el);
+      }, { passive: false });
     }
     els.panelContainer.appendChild(el);
+    mountMaterialOnPanel(el, p);
   }
   updatePanelControls();
 }
@@ -438,13 +543,14 @@ function splitSelectedPanel(direction) {
   const panel = getSelectedPanel();
   if (!panel) return;
   const idx = cur.panels.indexOf(panel);
+  // 素材は元コマ（先頭側）にだけ引き継ぐ。もう一方は空のコマになる。
   let a, b;
   if (direction === 'topBottom') {
-    a = { id: cur.nextPanelId++, x: panel.x, y: panel.y,             w: panel.w, h: panel.h / 2 };
-    b = { id: cur.nextPanelId++, x: panel.x, y: panel.y + panel.h / 2, w: panel.w, h: panel.h / 2 };
+    a = { id: cur.nextPanelId++, x: panel.x, y: panel.y,             w: panel.w, h: panel.h / 2, material: panel.material };
+    b = { id: cur.nextPanelId++, x: panel.x, y: panel.y + panel.h / 2, w: panel.w, h: panel.h / 2, material: null };
   } else {
-    a = { id: cur.nextPanelId++, x: panel.x,             y: panel.y, w: panel.w / 2, h: panel.h };
-    b = { id: cur.nextPanelId++, x: panel.x + panel.w / 2, y: panel.y, w: panel.w / 2, h: panel.h };
+    a = { id: cur.nextPanelId++, x: panel.x,             y: panel.y, w: panel.w / 2, h: panel.h, material: panel.material };
+    b = { id: cur.nextPanelId++, x: panel.x + panel.w / 2, y: panel.y, w: panel.w / 2, h: panel.h, material: null };
   }
   cur.panels.splice(idx, 1, a, b);
   cur.selectedPanelId = a.id;
@@ -458,6 +564,7 @@ function applyTemplate(templateId) {
   cur.panels = tmpl.panels.map((p) => ({
     id: cur.nextPanelId++,
     x: p.x, y: p.y, w: p.w, h: p.h,
+    material: null,
   }));
   cur.selectedPanelId = null;
   refreshPageView();
@@ -553,7 +660,19 @@ els.stageWrapper.addEventListener('drop', (e) => {
   e.preventDefault();
   els.stageWrapper.classList.remove('dragover');
   const file = e.dataTransfer.files && e.dataTransfer.files[0];
-  if (file) openFile(file);
+  if (!file) return;
+  // 画像かつドロップ位置がいずれかのコマ内なら、そのコマの素材として割り当てる
+  if (detectFileKind(file) === 'image') {
+    const panel = findPanelAtClientPoint(e.clientX, e.clientY);
+    if (panel) {
+      loadImageAsPanelMaterial(panel, file).catch((err) => {
+        console.error(err);
+        alert('素材の読み込みに失敗しました: ' + (err && err.message ? err.message : err));
+      });
+      return;
+    }
+  }
+  openFile(file);
 });
 
 function blobToDataUrl(blob) {
@@ -936,7 +1055,15 @@ function applyAllLayerStyles() {
 }
 
 // 画像のリサイズ(ウィンドウサイズ変更等)に追随
-window.addEventListener('resize', applyAllLayerStyles);
+window.addEventListener('resize', () => {
+  applyAllLayerStyles();
+  for (const p of cur.panels) {
+    if (!p.material) continue;
+    const el = els.panelContainer.querySelector(`[data-panel-id="${p.id}"]`);
+    const img = el && el.querySelector('.panel-material');
+    if (img) applyMaterialTransform(img, p, el);
+  }
+});
 els.baseImage.addEventListener('load', applyAllLayerStyles);
 if (document.fonts && document.fonts.ready) {
   document.fonts.ready.then(applyAllLayerStyles).catch(() => {});
