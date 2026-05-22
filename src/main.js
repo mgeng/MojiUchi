@@ -116,6 +116,9 @@ const TEMPLATES = {
 const DEFAULT_CANVAS_WIDTH = 1200;
 const DEFAULT_CANVAS_HEIGHT = 1700;
 
+const OPPOSITE_EDGE = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' };
+const MIN_PANEL_DIM = 0.05; // コマがゼロサイズにならないよう正規化座標での最小寸法
+
 const MONOLOGUE_PADDING = 12;
 const MONOLOGUE_BORDER = 2;
 
@@ -247,6 +250,141 @@ function refreshPageView() {
   updateInspector();
 }
 
+function isCanvasEdge(p, edge) {
+  const EPS = 0.001;
+  if (edge === 'left') return p.x <= EPS;
+  if (edge === 'right') return p.x + p.w >= 1 - EPS;
+  if (edge === 'top') return p.y <= EPS;
+  return p.y + p.h >= 1 - EPS;
+}
+
+function getEdgeCoord(p, edge) {
+  if (edge === 'left') return p.x;
+  if (edge === 'right') return p.x + p.w;
+  if (edge === 'top') return p.y;
+  return p.y + p.h;
+}
+
+function getPerpRange(p, edge) {
+  if (edge === 'left' || edge === 'right') return [p.y, p.y + p.h];
+  return [p.x, p.x + p.w];
+}
+
+// パネルの edge を共有する隣接パネルを返す。共有が「クリーンタイリング」（隣接群が
+// 完全に dragged panel のエッジ範囲を覆い、はみ出さない）でない場合は null を返す。
+// 戻り値 [] は「隣接なし＝自由辺」を意味し、ドラッグ自体は可能。
+function findAlignedNeighbors(panel, edge) {
+  const EPS = 0.001;
+  const target = getEdgeCoord(panel, edge);
+  const opposite = OPPOSITE_EDGE[edge];
+  const [ps, pe] = getPerpRange(panel, edge);
+  const candidates = [];
+  for (const q of cur.panels) {
+    if (q.id === panel.id) continue;
+    if (Math.abs(getEdgeCoord(q, opposite) - target) > EPS) continue;
+    const [qs, qe] = getPerpRange(q, opposite);
+    if (qs >= pe - EPS || qe <= ps + EPS) continue;
+    if (qs < ps - EPS || qe > pe + EPS) return null; // 範囲外にはみ出す（T字接続）
+    candidates.push({ panel: q, edge: opposite, qs, qe });
+  }
+  if (candidates.length === 0) return [];
+  candidates.sort((a, b) => a.qs - b.qs);
+  if (Math.abs(candidates[0].qs - ps) > EPS) return null;
+  for (let i = 1; i < candidates.length; i++) {
+    if (candidates[i].qs > candidates[i - 1].qe + EPS) return null;
+  }
+  if (Math.abs(candidates[candidates.length - 1].qe - pe) > EPS) return null;
+  return candidates.map((c) => ({ panel: c.panel, edge: c.edge }));
+}
+
+const EDGE_HIT_PX = 14; // パネル端からの距離がこの値以内ならその辺を「掴んでいる」と判定
+
+// パネル DOM 要素内でのマウス位置から、近接エッジと可否を返す。
+// 戻り値 null: 端に近くない / キャンバス端のみ。 { edge, resizable } を返す場合は UX フィードバックの対象。
+function getEdgeFromPoint(el, panel, clientX, clientY) {
+  const rect = el.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+  const w = rect.width;
+  const h = rect.height;
+  const candidates = [];
+  if (y < EDGE_HIT_PX) candidates.push({ edge: 'top', d: y });
+  if (h - y < EDGE_HIT_PX) candidates.push({ edge: 'bottom', d: h - y });
+  if (x < EDGE_HIT_PX) candidates.push({ edge: 'left', d: x });
+  if (w - x < EDGE_HIT_PX) candidates.push({ edge: 'right', d: w - x });
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => a.d - b.d);
+  // キャンバス外周はそもそも操作対象外（カーソル変化なし）
+  const usable = candidates.filter((c) => !isCanvasEdge(panel, c.edge));
+  if (usable.length === 0) return null;
+  // 角で2辺に近い場合は、リサイズ可能な方を優先
+  for (const c of usable) {
+    if (findAlignedNeighbors(panel, c.edge) !== null) {
+      return { edge: c.edge, resizable: true };
+    }
+  }
+  return { edge: usable[0].edge, resizable: false };
+}
+
+function cursorForEdge(edge) {
+  if (edge === 'top' || edge === 'bottom') return 'ns-resize';
+  if (edge === 'left' || edge === 'right') return 'ew-resize';
+  return '';
+}
+
+// パネルのスタイルを再生成せず更新（ドラッグ中の高頻度更新用）
+function applyPanelLayoutStyle(el, p) {
+  el.style.left = `calc(${p.x * 100}% + var(--panel-half-gutter))`;
+  el.style.top = `calc(${p.y * 100}% + var(--panel-half-gutter))`;
+  el.style.width = `calc(${p.w * 100}% - var(--panel-gutter))`;
+  el.style.height = `calc(${p.h * 100}% - var(--panel-gutter))`;
+}
+
+function startEdgeDrag(panel, edge, startEvent) {
+  if (startEvent.button !== 0) return;
+  startEvent.preventDefault();
+  startEvent.stopPropagation();
+  const aligned = findAlignedNeighbors(panel, edge);
+  if (aligned === null) return;
+  const rect = els.panelContainer.getBoundingClientRect();
+  const isHorizontal = edge === 'left' || edge === 'right';
+  const startClient = isHorizontal ? startEvent.clientX : startEvent.clientY;
+  const totalAxis = isHorizontal ? rect.width : rect.height;
+  const oldVal = getEdgeCoord(panel, edge);
+  const snap = [{ panel, edge }, ...aligned].map((a) => ({
+    panel: a.panel, edge: a.edge,
+    ox: a.panel.x, oy: a.panel.y, ow: a.panel.w, oh: a.panel.h,
+  }));
+  let lo = 0, hi = 1;
+  for (const s of snap) {
+    if (s.edge === 'right') lo = Math.max(lo, s.ox + MIN_PANEL_DIM);
+    else if (s.edge === 'left') hi = Math.min(hi, s.ox + s.ow - MIN_PANEL_DIM);
+    else if (s.edge === 'bottom') lo = Math.max(lo, s.oy + MIN_PANEL_DIM);
+    else hi = Math.min(hi, s.oy + s.oh - MIN_PANEL_DIM);
+  }
+  document.body.style.cursor = cursorForEdge(edge);
+  const onMove = (ev) => {
+    const delta = ((isHorizontal ? ev.clientX : ev.clientY) - startClient) / totalAxis;
+    const newVal = Math.max(lo, Math.min(hi, oldVal + delta));
+    for (const s of snap) {
+      const p = s.panel;
+      if (s.edge === 'right') p.w = newVal - s.ox;
+      else if (s.edge === 'left') { p.x = newVal; p.w = (s.ox + s.ow) - newVal; }
+      else if (s.edge === 'bottom') p.h = newVal - s.oy;
+      else { p.y = newVal; p.h = (s.oy + s.oh) - newVal; }
+      const el = els.panelContainer.querySelector(`[data-panel-id="${s.panel.id}"]`);
+      if (el) applyPanelLayoutStyle(el, s.panel);
+    }
+  };
+  const onUp = () => {
+    document.body.style.cursor = '';
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
 function renderPanels() {
   els.panelContainer.innerHTML = '';
   for (const p of cur.panels) {
@@ -256,14 +394,26 @@ function renderPanels() {
     el.dataset.panelId = String(p.id);
     // 隣接コマ間にフル gutter、外周にはハーフ gutter の余白を取り、各コマが独立した箱に見えるようにする。
     // gutter は CSS 変数経由なのでスライダー操作で再描画なしに反映される。
-    el.style.left = `calc(${p.x * 100}% + var(--panel-half-gutter))`;
-    el.style.top = `calc(${p.y * 100}% + var(--panel-half-gutter))`;
-    el.style.width = `calc(${p.w * 100}% - var(--panel-gutter))`;
-    el.style.height = `calc(${p.h * 100}% - var(--panel-gutter))`;
+    applyPanelLayoutStyle(el, p);
     el.addEventListener('click', (e) => {
       e.stopPropagation();
       selectPanel(p.id);
     });
+    // 選択中のコマだけがエッジドラッグ対応。ホバー中のカーソルを近接エッジに合わせて切替える。
+    if (p.id === cur.selectedPanelId) {
+      el.addEventListener('mousemove', (e) => {
+        const hit = getEdgeFromPoint(el, p, e.clientX, e.clientY);
+        if (!hit) el.style.cursor = 'pointer';
+        else if (!hit.resizable) el.style.cursor = 'not-allowed';
+        else el.style.cursor = cursorForEdge(hit.edge);
+      });
+      el.addEventListener('mouseleave', () => { el.style.cursor = ''; });
+      el.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        const hit = getEdgeFromPoint(el, p, e.clientX, e.clientY);
+        if (hit && hit.resizable) startEdgeDrag(p, hit.edge, e);
+      });
+    }
     els.panelContainer.appendChild(el);
   }
   updatePanelControls();
