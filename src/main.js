@@ -975,7 +975,10 @@ function deselect() {
   cur.selectedId = null;
   cur.layers.forEach((l) => l.el.classList.remove('selected'));
   els.stage.classList.remove('image-selected');
+  const hadPanelSelection = cur.selectedPanelId != null;
+  cur.selectedPanelId = null;
   updateInspector();
+  if (hadPanelSelection) renderPanels();
 }
 
 function isImageSelected() {
