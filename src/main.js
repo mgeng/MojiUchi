@@ -192,7 +192,7 @@ function openFile(file) {
   }
 }
 
-const MAX_PAGES = 4;
+const MAX_PAGES = 16;
 
 function createEmptyPage() {
   const page = {
