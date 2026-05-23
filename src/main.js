@@ -61,10 +61,14 @@ const els = {
   propLineHeightValue: document.getElementById('propLineHeightValue'),
   propDelete: document.getElementById('propDelete'),
   stickerProps: document.getElementById('stickerProps'),
+  stickerTitle: document.getElementById('stickerTitle'),
+  stickerHint: document.getElementById('stickerHint'),
   stickerDelete: document.getElementById('stickerDelete'),
   stickerFlipH: document.getElementById('stickerFlipH'),
   stickerFlipV: document.getElementById('stickerFlipV'),
+  bubblePickerField: document.getElementById('bubblePickerField'),
   bubblePicker: document.getElementById('bubblePicker'),
+  overlayFileInput: document.getElementById('overlayFileInput'),
   memoToggle: document.getElementById('memoToggle'),
   memoPanel: document.getElementById('memoPanel'),
   memoHeader: document.getElementById('memoHeader'),
@@ -268,12 +272,19 @@ function refreshPageView() {
   updateActionButtons();
   renderPanels();
   if (els.templateSelect) els.templateSelect.value = cur.template;
-  // 現在ページのレイヤー DOM を layerContainer に並べ直す。ステッカーは canvas より
-  // 背面、テキストレイヤーは canvas より前面になるよう挿入位置を分ける。
+  // 現在ページのレイヤー DOM を layerContainer に並べ直す。
+  // 描画順(奥→手前): overlay → sticker → previewCanvas → text。
+  // overlay と sticker はどちらも previewCanvas の前に挿入するが、overlay を先に挿入することで
+  // sticker より背面になる(同じアンカーへの insertBefore は順次積まれる)。
+  for (const l of cur.layers) {
+    if (l.kind === 'overlay') {
+      els.layerContainer.insertBefore(l.el, previewCanvas);
+    }
+  }
   for (const l of cur.layers) {
     if (l.kind === 'sticker') {
       els.layerContainer.insertBefore(l.el, previewCanvas);
-    } else {
+    } else if (l.kind !== 'overlay') {
       els.layerContainer.appendChild(l.el);
     }
   }
@@ -692,7 +703,7 @@ function switchToPage(index) {
   if (index === state.currentPageIndex) return;
   // いまのページのレイヤー DOM を退避(削除はしない、要素は残す)
   for (const l of cur.layers) {
-    if (l.kind === 'sticker') removeStickerHandles(l);
+    if (isStickerLike(l)) removeStickerHandles(l);
     l.el.remove();
   }
   state.currentPageIndex = index;
@@ -855,17 +866,23 @@ els.stageWrapper.addEventListener('drop', (e) => {
   els.stageWrapper.classList.remove('dragover');
   const file = e.dataTransfer.files && e.dataTransfer.files[0];
   if (!file) return;
-  // 画像はコマへのドロップだけ受け付ける（コマ外へのドロップは何もしない）
+  // 画像ドロップは常に「上重ね画像」として追加。
+  // コマへの素材セットはコマのダブルクリックから行う。
   if (detectFileKind(file) === 'image') {
-    const panel = findPanelAtClientPoint(e.clientX, e.clientY);
-    if (panel) {
-      loadImageAsPanelMaterial(panel, file).catch((err) => {
-        console.error(err);
-        alert('素材の読み込みに失敗しました: ' + (err && err.message ? err.message : err));
-      });
-    } else {
-      alert('画像はコマの上にドロップしてください。');
+    const rect = els.stage.getBoundingClientRect();
+    let coords = null;
+    if (rect.width > 0 && rect.height > 0) {
+      const scaleX = cur.canvasWidth / rect.width;
+      const scaleY = cur.canvasHeight / rect.height;
+      coords = {
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY,
+      };
     }
+    addOverlayFromFile(file, coords).catch((err) => {
+      console.error(err);
+      alert('画像の読み込みに失敗しました: ' + (err && err.message ? err.message : err));
+    });
     return;
   }
   openFile(file);
@@ -939,7 +956,28 @@ els.contextMenu.addEventListener('click', (e) => {
     addTextLayer({ x: contextMenuTargetCoords.x, y: contextMenuTargetCoords.y, kind: 'monologue' });
   } else if (action === 'add-bubble') {
     addStickerLayer({ x: contextMenuTargetCoords.x, y: contextMenuTargetCoords.y, src: STICKER_DEFAULT_SRC });
+  } else if (action === 'add-overlay') {
+    pendingOverlayCoords = { ...contextMenuTargetCoords };
+    els.overlayFileInput.value = '';
+    els.overlayFileInput.click();
   }
+});
+
+let pendingOverlayCoords = null;
+els.overlayFileInput.addEventListener('change', () => {
+  const file = els.overlayFileInput.files && els.overlayFileInput.files[0];
+  els.overlayFileInput.value = '';
+  if (!file) { pendingOverlayCoords = null; return; }
+  const coords = pendingOverlayCoords;
+  pendingOverlayCoords = null;
+  if (detectFileKind(file) !== 'image') {
+    alert('画像ファイルを指定してください。');
+    return;
+  }
+  addOverlayFromFile(file, coords).catch((err) => {
+    console.error(err);
+    alert('画像の読み込みに失敗しました: ' + (err && err.message ? err.message : err));
+  });
 });
 
 // メニュー外のマウスダウンで閉じる(キャプチャ段階で他の stopPropagation より先に拾う)
@@ -1012,6 +1050,10 @@ function addTextLayer({ x, y, text = 'テキスト', font, size, orientation, li
 
 // 吹き出しステッカー(独立配置の画像レイヤー)。テキストレイヤー配列(cur.layers)に
 // 同居させて、選択/削除/Delete/矢印キー移動などの既存ロジックを再利用する。
+function isStickerLike(layer) {
+  return layer && (layer.kind === 'sticker' || layer.kind === 'overlay');
+}
+
 function addStickerLayer({ x, y, src, width, height, flipH, flipV }, targetPage = cur) {
   const id = targetPage.nextId++;
   const layer = {
@@ -1058,6 +1100,65 @@ function addStickerLayer({ x, y, src, width, height, flipH, flipV }, targetPage 
     selectLayer(id);
     updateActionButtons();
   }
+}
+
+// 上重ね画像レイヤー(コマをまたぐ効果音や演出画像)。sticker と同じ DOM/ハンドラを再利用するが、
+// 描画順は sticker より背面、サイズ変更時はアスペクト比固定、画像は dataUrl で持つ。
+function addOverlayLayer({ x, y, src, width, height, naturalWidth, naturalHeight, flipH, flipV }, targetPage = cur) {
+  const id = targetPage.nextId++;
+  const layer = {
+    id,
+    kind: 'overlay',
+    src,
+    x,
+    y,
+    width: width || 0,
+    height: height || 0,
+    naturalWidth: naturalWidth || 0,
+    naturalHeight: naturalHeight || 0,
+    flipH: !!flipH,
+    flipV: !!flipV,
+    el: null,
+  };
+  const el = document.createElement('img');
+  el.className = 'sticker-layer';
+  el.draggable = false;
+  el.dataset.id = String(id);
+  el.src = src;
+  layer.el = el;
+  targetPage.layers.push(layer);
+  attachStickerHandlers(layer);
+  if (targetPage === cur) {
+    // sticker よりさらに背面に挿入。既存 sticker があればその前、無ければ previewCanvas の前。
+    const firstSticker = cur.layers.find((l) => l.kind === 'sticker');
+    const anchor = firstSticker ? firstSticker.el : previewCanvas;
+    els.layerContainer.insertBefore(el, anchor);
+    applyStickerStyle(layer);
+    selectLayer(id);
+    updateActionButtons();
+  }
+}
+
+// 画像ファイルから上重ね画像レイヤーを作る。デフォルトサイズはページ幅の 50%(アスペクト比維持)。
+// ドロップ座標(またはクリック座標)を中心にして配置。
+async function addOverlayFromFile(file, dropCoords) {
+  const dataUrl = await blobToDataUrl(file);
+  const sz = await getImageNaturalSize(dataUrl);
+  const pageW = cur.canvasWidth;
+  const w = pageW * 0.5;
+  const aspect = sz.width === 0 ? 1 : sz.height / sz.width;
+  const h = w * aspect;
+  const cx = dropCoords ? dropCoords.x : cur.canvasWidth / 2;
+  const cy = dropCoords ? dropCoords.y : cur.canvasHeight / 2;
+  addOverlayLayer({
+    x: cx - w / 2,
+    y: cy - h / 2,
+    src: dataUrl,
+    width: w,
+    height: h,
+    naturalWidth: sz.width,
+    naturalHeight: sz.height,
+  });
 }
 
 function attachStickerHandlers(layer) {
@@ -1127,7 +1228,7 @@ const STICKER_HANDLE_CORNERS = ['nw', 'ne', 'sw', 'se'];
 const STICKER_MIN_SIZE = 20;
 
 function ensureStickerHandles(layer) {
-  if (!layer || layer.kind !== 'sticker' || layer.handles) return;
+  if (!isStickerLike(layer) || layer.handles) return;
   layer.handles = {};
   for (const corner of STICKER_HANDLE_CORNERS) {
     const h = document.createElement('div');
@@ -1150,7 +1251,7 @@ function removeStickerHandles(layer) {
 function syncStickerHandles() {
   const selected = getSelectedLayer();
   for (const l of cur.layers) {
-    if (l.kind !== 'sticker') continue;
+    if (!isStickerLike(l)) continue;
     if (l === selected) ensureStickerHandles(l);
     else removeStickerHandles(l);
   }
@@ -1191,11 +1292,26 @@ function attachStickerHandleDrag(layer, el, corner) {
     const origY = layer.y;
     const origW = layer.width;
     const origH = layer.height;
+    const aspectLocked = layer.kind === 'overlay';
+    const aspect = origW > 0 ? origH / origW : 1;
     const onMove = (ev) => {
       const dx = (ev.clientX - startX) * scaleX;
       const dy = (ev.clientY - startY) * scaleY;
       let nx = origX, ny = origY, nw = origW, nh = origH;
-      if (corner === 'nw') {
+      if (aspectLocked) {
+        // 各角における「拡大方向の符号」に合わせて dx/dy を符号反転し、
+        // 横/縦どちらの動きが大きい方を採用してアスペクト比を保つ。
+        const expandX = (corner === 'se' || corner === 'ne') ? dx : -dx;
+        const expandY = (corner === 'se' || corner === 'sw') ? dy : -dy;
+        const candW1 = origW + expandX;
+        const candW2 = aspect === 0 ? candW1 : (origH + expandY) / aspect;
+        nw = Math.max(STICKER_MIN_SIZE, Math.max(candW1, candW2));
+        nh = nw * aspect;
+        // 対角を固定: 掴んだ角と反対側の角を動かさない
+        if (corner === 'nw') { nx = origX + (origW - nw); ny = origY + (origH - nh); }
+        else if (corner === 'ne') { ny = origY + (origH - nh); }
+        else if (corner === 'sw') { nx = origX + (origW - nw); }
+      } else if (corner === 'nw') {
         nw = Math.max(STICKER_MIN_SIZE, origW - dx);
         nh = Math.max(STICKER_MIN_SIZE, origH - dy);
         nx = origX + (origW - nw);
@@ -1347,7 +1463,7 @@ function isEditableTarget() {
 }
 
 function deleteLayer(layer) {
-  if (layer.kind === 'sticker') removeStickerHandles(layer);
+  if (isStickerLike(layer)) removeStickerHandles(layer);
   layer.el.remove();
   cur.layers = cur.layers.filter((l) => l.id !== layer.id);
   renderTextPreview();
@@ -1378,9 +1494,9 @@ document.addEventListener('keydown', (e) => {
   const layer = getSelectedLayer();
   if (!layer) return;
 
-  // Ctrl+↑/↓ で文字サイズを変更(スライダーと同じ 8〜120 の範囲)。ステッカーには適用しない
+  // Ctrl+↑/↓ で文字サイズを変更(スライダーと同じ 8〜120 の範囲)。画像系レイヤーには適用しない
   if ((e.ctrlKey || e.metaKey) && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-    if (layer.kind === 'sticker') return;
+    if (isStickerLike(layer)) return;
     e.preventDefault();
     const sizeDelta = e.key === 'ArrowUp' ? 1 : -1;
     layer.size = Math.max(8, Math.min(120, layer.size + sizeDelta));
@@ -1413,7 +1529,7 @@ function getSelectedLayer() {
 // --- スタイル反映 ---
 
 function applyLayerStyle(layer) {
-  if (layer.kind === 'sticker') {
+  if (isStickerLike(layer)) {
     applyStickerStyle(layer);
     return;
   }
@@ -1463,10 +1579,17 @@ function updateInspector() {
     els.stickerProps.hidden = true;
     return;
   }
-  if (layer.kind === 'sticker') {
+  if (isStickerLike(layer)) {
     els.textProps.hidden = true;
     els.stickerProps.hidden = false;
-    updateBubblePickerSelection(layer);
+    const isOverlay = layer.kind === 'overlay';
+    els.stickerTitle.textContent = isOverlay ? '選択中の上重ね画像' : '選択中の吹き出し';
+    els.stickerHint.textContent = isOverlay
+      ? 'ドラッグで移動 / 四隅でリサイズ(アスペクト比固定) / ホイールで拡縮'
+      : 'ドラッグで移動 / 四隅でリサイズ / ホイールで拡縮';
+    els.bubblePickerField.hidden = isOverlay;
+    els.stickerDelete.textContent = isOverlay ? 'この上重ね画像を削除' : 'この吹き出しを削除';
+    if (!isOverlay) updateBubblePickerSelection(layer);
     els.stickerFlipH.classList.toggle('active', !!layer.flipH);
     els.stickerFlipV.classList.toggle('active', !!layer.flipV);
     return;
@@ -1533,7 +1656,7 @@ els.propDelete.addEventListener('click', () => {
 
 els.stickerFlipH.addEventListener('click', () => {
   const layer = getSelectedLayer();
-  if (!layer || layer.kind !== 'sticker') return;
+  if (!isStickerLike(layer)) return;
   layer.flipH = !layer.flipH;
   applyStickerStyle(layer);
   els.stickerFlipH.classList.toggle('active', layer.flipH);
@@ -1541,7 +1664,7 @@ els.stickerFlipH.addEventListener('click', () => {
 
 els.stickerFlipV.addEventListener('click', () => {
   const layer = getSelectedLayer();
-  if (!layer || layer.kind !== 'sticker') return;
+  if (!isStickerLike(layer)) return;
   layer.flipV = !layer.flipV;
   applyStickerStyle(layer);
   els.stickerFlipV.classList.toggle('active', layer.flipV);
@@ -1792,8 +1915,8 @@ function renderTextPreview() {
   const ctx = previewCanvas.getContext('2d');
   ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
   cur.layers.forEach((layer) => {
-    // ステッカー(画像)は DOM の <img> として直接表示するのでプレビュー canvas には描かない
-    if (layer.kind === 'sticker') return;
+    // 画像系レイヤー(sticker / overlay)は DOM の <img> として直接表示するのでプレビュー canvas には描かない
+    if (isStickerLike(layer)) return;
     if (!layer.el.classList.contains('editing')) {
       drawTextLayer(ctx, layer);
     }
@@ -1974,7 +2097,7 @@ async function saveBlob(blob, suggestedName, { description, mimeType, extension 
 
 const PROJECT_VERSION = 2;
 
-function buildProjectData(page = cur) {
+function buildProjectData(page = cur, overlayFileById = new Map()) {
   return {
     version: PROJECT_VERSION,
     canvas: {
@@ -1994,6 +2117,20 @@ function buildProjectData(page = cur) {
           flipV: !!l.flipV,
         };
       }
+      if (l.kind === 'overlay') {
+        return {
+          kind: 'overlay',
+          file: overlayFileById.get(l.id) || null,
+          x: l.x,
+          y: l.y,
+          width: l.width,
+          height: l.height,
+          naturalWidth: l.naturalWidth || 0,
+          naturalHeight: l.naturalHeight || 0,
+          flipH: !!l.flipH,
+          flipV: !!l.flipV,
+        };
+      }
       return {
         text: l.text,
         x: l.x,
@@ -2008,7 +2145,7 @@ function buildProjectData(page = cur) {
   };
 }
 
-function applyProjectData(data, targetPage = cur) {
+async function applyProjectData(data, targetPage = cur, overlayEntries = {}) {
   for (const l of targetPage.layers) l.el.remove();
   targetPage.layers = [];
   targetPage.selectedId = null;
@@ -2024,6 +2161,31 @@ function applyProjectData(data, targetPage = cur) {
         flipH: !!l.flipH,
         flipV: !!l.flipV,
       }, targetPage);
+      continue;
+    }
+    if (l.kind === 'overlay') {
+      const entry = l.file ? overlayEntries[l.file] : null;
+      if (!entry) {
+        console.warn(`上重ね画像のファイルが見つかりません: ${l.file}`);
+        continue;
+      }
+      try {
+        const blob = await entry.async('blob');
+        const dataUrl = await blobToDataUrl(blob);
+        addOverlayLayer({
+          x: Number(l.x) || 0,
+          y: Number(l.y) || 0,
+          src: dataUrl,
+          width: typeof l.width === 'number' ? l.width : 0,
+          height: typeof l.height === 'number' ? l.height : 0,
+          naturalWidth: typeof l.naturalWidth === 'number' ? l.naturalWidth : 0,
+          naturalHeight: typeof l.naturalHeight === 'number' ? l.naturalHeight : 0,
+          flipH: !!l.flipH,
+          flipV: !!l.flipV,
+        }, targetPage);
+      } catch (err) {
+        console.warn(`上重ね画像の展開に失敗 (${l.file}):`, err);
+      }
       continue;
     }
     addTextLayer({
@@ -2073,7 +2235,21 @@ async function buildBundleBlob() {
   zip.file('manifest.json', JSON.stringify({ version: BUNDLE_VERSION, pages: state.pages.length }));
   state.pages.forEach((page, i) => {
     const idx = i + 1;
-    zip.file(`pages/${idx}/${BUNDLE_TEXT_NAME}`, JSON.stringify(buildProjectData(page), null, 2));
+    // 上重ね画像を先に zip に書き込み、layer.id → file パスのマップを作る
+    const overlayFileById = new Map();
+    for (const l of page.layers) {
+      if (l.kind !== 'overlay' || typeof l.src !== 'string') continue;
+      try {
+        const blob = dataUrlToBlob(l.src);
+        const ext = extFromMime(blob.type);
+        const file = `overlays/${l.id}${ext}`;
+        zip.file(`pages/${idx}/${file}`, blob);
+        overlayFileById.set(l.id, file);
+      } catch (err) {
+        console.warn(`上重ね画像 layer ${l.id} の書き出しに失敗:`, err);
+      }
+    }
+    zip.file(`pages/${idx}/${BUNDLE_TEXT_NAME}`, JSON.stringify(buildProjectData(page, overlayFileById), null, 2));
     const memo = page.memo || '';
     if (memo.length > 0) {
       zip.file(`pages/${idx}/${BUNDLE_MEMO_NAME}`, memo);
@@ -2166,14 +2342,12 @@ function resetAllPagesForBundle() {
 
 async function loadPageFromBundle(pageIndex, entries) {
   const page = state.pages[pageIndex];
-  const { textEntry, memoEntry, panelsEntry, materialEntries } = entries;
+  const { textEntry, memoEntry, panelsEntry, materialEntries, overlayEntries } = entries;
   if (textEntry) {
     try {
       const data = JSON.parse(await textEntry.async('string'));
       if (data && Array.isArray(data.layers)) {
-        // 旧形式の image: {width,height} は canvas: {} として読む（panels.json 側に
-        // canvasWidth/Height が無いケースだけ反映するため、ここでは保持しない）
-        applyProjectData(data, page);
+        await applyProjectData(data, page, overlayEntries || {});
       }
     } catch (err) {
       console.warn(`pages/${pageIndex + 1}/text.json の展開に失敗:`, err);
@@ -2255,7 +2429,7 @@ async function loadBundleFile(file, handle = null) {
   // pages/N/... の新形式のみを読む（漫画全体画像のエントリは検出したら warn して捨てる）。
   const pageEntries = [];
   for (let i = 0; i < MAX_PAGES; i++) {
-    pageEntries.push({ textEntry: null, memoEntry: null, panelsEntry: null, materialEntries: {} });
+    pageEntries.push({ textEntry: null, memoEntry: null, panelsEntry: null, materialEntries: {}, overlayEntries: {} });
   }
   let droppedLegacyImage = false;
   zip.forEach((path, entry) => {
@@ -2272,6 +2446,13 @@ async function loadBundleFile(file, handle = null) {
     const matM = name.match(/^materials\/(\d+)\.[a-z0-9]+$/i);
     if (matM) {
       pageEntries[idx].materialEntries[parseInt(matM[1], 10)] = entry;
+      return;
+    }
+    // overlays/<layerId>.<ext> は text.json の {file: ...} と突き合わせるため
+    // 相対パスをキーにしてそのまま持っておく
+    const ovM = name.match(/^overlays\/[^/]+$/);
+    if (ovM) {
+      pageEntries[idx].overlayEntries[name] = entry;
       return;
     }
     if (name === BUNDLE_PANELS_NAME) {
@@ -2297,7 +2478,9 @@ async function loadBundleFile(file, handle = null) {
 
   for (let i = 0; i < MAX_PAGES; i++) {
     const e = pageEntries[i];
-    if (!e.textEntry && !e.memoEntry && !e.panelsEntry && Object.keys(e.materialEntries).length === 0) continue;
+    if (!e.textEntry && !e.memoEntry && !e.panelsEntry
+        && Object.keys(e.materialEntries).length === 0
+        && Object.keys(e.overlayEntries).length === 0) continue;
     try {
       await loadPageFromBundle(i, e);
     } catch (err) {
@@ -2391,31 +2574,35 @@ els.exportBtn.addEventListener('click', async () => {
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, pageW, pageH);
     await drawPanelsAndMaterials(ctx, cur, pageW, pageH);
-    // ステッカー(吹き出し画像)を先に並列ロードして、レイヤー順通りに描く
-    const stickerImgs = await Promise.all(
-      cur.layers.map((l) => (l.kind === 'sticker' ? loadImageElement(l.src).catch(() => null) : null))
+    // 画像系レイヤー(overlay / sticker)を並列ロード。
+    const layerImgs = await Promise.all(
+      cur.layers.map((l) => (isStickerLike(l) ? loadImageElement(l.src).catch(() => null) : null))
     );
-    cur.layers.forEach((layer, i) => {
-      if (layer.kind === 'sticker') {
-        const img = stickerImgs[i];
-        if (img && layer.width > 0 && layer.height > 0) {
-          if (layer.flipH || layer.flipV) {
-            const sx = layer.flipH ? -1 : 1;
-            const sy = layer.flipV ? -1 : 1;
-            const tx = layer.x + (layer.flipH ? layer.width : 0);
-            const ty = layer.y + (layer.flipV ? layer.height : 0);
-            ctx.save();
-            ctx.translate(tx, ty);
-            ctx.scale(sx, sy);
-            ctx.drawImage(img, 0, 0, layer.width, layer.height);
-            ctx.restore();
-          } else {
-            ctx.drawImage(img, layer.x, layer.y, layer.width, layer.height);
-          }
-        }
+    const drawImageLayer = (layer, img) => {
+      if (!img || !(layer.width > 0 && layer.height > 0)) return;
+      if (layer.flipH || layer.flipV) {
+        const sx = layer.flipH ? -1 : 1;
+        const sy = layer.flipV ? -1 : 1;
+        const tx = layer.x + (layer.flipH ? layer.width : 0);
+        const ty = layer.y + (layer.flipV ? layer.height : 0);
+        ctx.save();
+        ctx.translate(tx, ty);
+        ctx.scale(sx, sy);
+        ctx.drawImage(img, 0, 0, layer.width, layer.height);
+        ctx.restore();
       } else {
-        drawTextLayer(ctx, layer);
+        ctx.drawImage(img, layer.x, layer.y, layer.width, layer.height);
       }
+    };
+    // 描画順(奥→手前): overlay → sticker → text。DOM の積み順と合わせる。
+    cur.layers.forEach((layer, i) => {
+      if (layer.kind === 'overlay') drawImageLayer(layer, layerImgs[i]);
+    });
+    cur.layers.forEach((layer, i) => {
+      if (layer.kind === 'sticker') drawImageLayer(layer, layerImgs[i]);
+    });
+    cur.layers.forEach((layer) => {
+      if (!isStickerLike(layer)) drawTextLayer(ctx, layer);
     });
 
     const pngBlob = await canvasToPngBlob(canvas);

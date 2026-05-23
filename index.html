@@ -94,9 +94,9 @@
       </div>
 
       <div class="inspector-section" id="stickerProps" hidden>
-        <h2>選択中の吹き出し</h2>
-        <p class="hint">ドラッグで移動 / ホイールで拡縮</p>
-        <div class="field">
+        <h2 id="stickerTitle">選択中の吹き出し</h2>
+        <p class="hint" id="stickerHint">ドラッグで移動 / ホイールで拡縮</p>
+        <div class="field" id="bubblePickerField">
           <span>形状</span>
           <div id="bubblePicker" class="bubble-picker"></div>
         </div>
@@ -153,6 +153,8 @@
     <button type="button" class="context-menu-item" data-action="add-text">テキストを追加</button>
     <button type="button" class="context-menu-item" data-action="add-monologue">モノローグ</button>
     <button type="button" class="context-menu-item" data-action="add-bubble">フキダシ</button>
+    <button type="button" class="context-menu-item" data-action="add-overlay">画像を上から追加</button>
+    <input type="file" id="overlayFileInput" accept="image/*" hidden />
   </div>
 
   <script src="assets/vendor/jszip.min.js" defer></script>
