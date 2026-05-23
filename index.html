@@ -92,6 +92,14 @@
         <p class="hint">選択中: 矢印キーで1px移動 / Ctrl+↑↓ で文字サイズ変更</p>
       </div>
 
+      <div class="inspector-section" id="stickerProps" hidden>
+        <h2>選択中の吹き出し</h2>
+        <p class="hint">ドラッグで移動 / ホイールで拡縮</p>
+        <div class="field-row">
+          <button id="stickerDelete" class="btn btn-danger">この吹き出しを削除</button>
+        </div>
+      </div>
+
       <div class="inspector-section" id="textProps" hidden>
         <h2>選択中のテキスト</h2>
 
@@ -135,6 +143,7 @@
   <div id="contextMenu" class="context-menu" hidden>
     <button type="button" class="context-menu-item" data-action="add-text">テキストを追加</button>
     <button type="button" class="context-menu-item" data-action="add-monologue">モノローグ</button>
+    <button type="button" class="context-menu-item" data-action="add-bubble">フキダシ</button>
   </div>
 
   <script src="assets/vendor/jszip.min.js" defer></script>
