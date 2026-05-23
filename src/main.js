@@ -46,6 +46,7 @@ const els = {
   panelGutterValue: document.getElementById('panelGutterValue'),
   splitTopBottomBtn: document.getElementById('splitTopBottomBtn'),
   splitLeftRightBtn: document.getElementById('splitLeftRightBtn'),
+  deletePanelBtn: document.getElementById('deletePanelBtn'),
   panelMaterialProps: document.getElementById('panelMaterialProps'),
   materialResetBtn: document.getElementById('materialResetBtn'),
   materialRemoveBtn: document.getElementById('materialRemoveBtn'),
@@ -592,11 +593,54 @@ function updatePanelControls() {
   const hasSelection = sel != null;
   els.splitTopBottomBtn.disabled = !hasSelection;
   els.splitLeftRightBtn.disabled = !hasSelection;
+  els.deletePanelBtn.disabled = !canDeletePanel(sel);
   els.panelMaterialProps.hidden = !(hasSelection && sel.material);
 }
 
 function getSelectedPanel() {
   return cur.panels.find((p) => p.id === cur.selectedPanelId) || null;
+}
+
+// 削除パネル吸収のための「最良の辺」を探す。
+// 戻り値 null: クリーンタイリングが成立する辺が無い（=削除不可）
+// 戻り値 { edge, neighbors }: その辺の隣接群が削除パネルの空きを埋められる
+function findBestDeleteEdge(panel) {
+  const candidates = [];
+  for (const edge of ['top', 'right', 'bottom', 'left']) {
+    const neighbors = findAlignedNeighbors(panel, edge);
+    if (neighbors === null) continue;
+    if (neighbors.length === 0) continue; // キャンバス外周（隣接なし）
+    candidates.push({ edge, neighbors });
+  }
+  if (candidates.length === 0) return null;
+  // 隣接数が少ない辺を優先（単純な吸収ほど見た目が綺麗）
+  candidates.sort((a, b) => a.neighbors.length - b.neighbors.length);
+  return candidates[0];
+}
+
+function canDeletePanel(panel) {
+  if (!panel) return false;
+  if (cur.panels.length <= 1) return false;
+  return findBestDeleteEdge(panel) !== null;
+}
+
+function deleteSelectedPanel() {
+  const panel = getSelectedPanel();
+  if (!panel) return;
+  if (cur.panels.length <= 1) return;
+  const choice = findBestDeleteEdge(panel);
+  if (!choice) return;
+  // 隣接コマを削除パネル側へ拡張。qEdge は隣接コマ q のうち panel に接している辺。
+  for (const { panel: q, edge: qEdge } of choice.neighbors) {
+    if (qEdge === 'left') { q.x = panel.x; q.w += panel.w; }
+    else if (qEdge === 'right') { q.w += panel.w; }
+    else if (qEdge === 'top') { q.y = panel.y; q.h += panel.h; }
+    else /* bottom */ { q.h += panel.h; }
+  }
+  cur.panels = cur.panels.filter((p) => p.id !== panel.id);
+  cur.selectedPanelId = null;
+  renderPanels();
+  updateActionButtons();
 }
 
 function splitSelectedPanel(direction) {
@@ -677,6 +721,7 @@ els.panelGutterInput.addEventListener('input', () => {
 
 els.splitTopBottomBtn.addEventListener('click', () => splitSelectedPanel('topBottom'));
 els.splitLeftRightBtn.addEventListener('click', () => splitSelectedPanel('leftRight'));
+els.deletePanelBtn.addEventListener('click', () => deleteSelectedPanel());
 
 els.materialResetBtn.addEventListener('click', () => {
   const sel = getSelectedPanel();
@@ -1149,6 +1194,16 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
     e.preventDefault();
     switchToPage(state.currentPageIndex + (e.key === 'ArrowRight' ? 1 : -1));
+    return;
+  }
+
+  // パネル選択中（テキスト/ステッカー未選択）に Delete でコマ削除。
+  // selectPanel / selectLayer は排他的なので getSelectedLayer() は null のはず。
+  if (e.key === 'Delete' && cur.selectedPanelId != null && !getSelectedLayer()) {
+    if (canDeletePanel(getSelectedPanel())) {
+      e.preventDefault();
+      deleteSelectedPanel();
+    }
     return;
   }
 
