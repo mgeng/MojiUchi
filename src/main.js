@@ -125,7 +125,7 @@ const MONOLOGUE_PADDING = 12;
 const MONOLOGUE_BORDER = 2;
 
 // 吹き出しステッカー(画像)の既定値
-const STICKER_DEFAULT_SRC = 'assets/bubbles/bubble-01-oval.png';
+const STICKER_DEFAULT_SRC = 'assets/bubbles/vertical/bubble-01-oval.png';
 const STICKER_DEFAULT_WIDTH = 280; // ページ座標での初期表示幅
 
 // フキダシ：楕円の長半径 = (テキスト半幅 + パディング) × √2 で外接楕円にする。
