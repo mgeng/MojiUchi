@@ -60,6 +60,7 @@ const els = {
   propDelete: document.getElementById('propDelete'),
   stickerProps: document.getElementById('stickerProps'),
   stickerDelete: document.getElementById('stickerDelete'),
+  bubblePicker: document.getElementById('bubblePicker'),
   memoToggle: document.getElementById('memoToggle'),
   memoPanel: document.getElementById('memoPanel'),
   memoHeader: document.getElementById('memoHeader'),
@@ -126,6 +127,22 @@ const MONOLOGUE_BORDER = 2;
 
 // 吹き出しステッカー(画像)の既定値
 const STICKER_DEFAULT_SRC = 'assets/bubbles/vertical/bubble-01-oval.png';
+
+// 吹き出しピッカーに並べる候補。vertical と horizontal の両方を一覧表示する。
+const BUBBLE_CATALOG = [
+  ...[
+    'bubble-01-oval', 'bubble-02-oval-thin', 'bubble-03-spiky', 'bubble-04-spiky-angular',
+    'bubble-05-dashed-oval', 'bubble-06-cloud', 'bubble-07-rect', 'bubble-08-poly',
+    'bubble-09-poly-marked', 'bubble-10-dashed-poly',
+  ].map((n) => `assets/bubbles/vertical/${n}.png`),
+  ...[
+    'bubble-01-oval', 'bubble-02-oval-thin', 'bubble-03-spiky', 'bubble-04-spiky-angular',
+    'bubble-05-dashed-oval', 'bubble-06-cloud', 'bubble-07-rect', 'bubble-08-poly',
+    'bubble-09-poly-marked', 'bubble-10-dashed-poly',
+    'bubble-11-long-oval', 'bubble-12-long-oval-2', 'bubble-13-long-oval-3',
+    'bubble-14-long-oval-tail', 'bubble-15-long-rect', 'bubble-16-long-rect-dashed',
+  ].map((n) => `assets/bubbles/horizontal/${n}.png`),
+];
 const STICKER_DEFAULT_WIDTH = 280; // ページ座標での初期表示幅
 
 // フキダシ：楕円の長半径 = (テキスト半幅 + パディング) × √2 で外接楕円にする。
@@ -1226,6 +1243,7 @@ function updateInspector() {
   if (layer.kind === 'sticker') {
     els.textProps.hidden = true;
     els.stickerProps.hidden = false;
+    updateBubblePickerSelection(layer);
     return;
   }
   els.stickerProps.hidden = true;
@@ -1293,6 +1311,64 @@ els.stickerDelete.addEventListener('click', () => {
   if (!layer) return;
   deleteLayer(layer);
 });
+
+// --- 吹き出しピッカー(形状の差し替え) ---
+
+function initBubblePicker() {
+  const picker = els.bubblePicker;
+  if (!picker) return;
+  for (const src of BUBBLE_CATALOG) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'bubble-thumb';
+    btn.dataset.src = src;
+    // ツールチップ: 末尾2階層(vertical/bubble-xx.png)を出す
+    const parts = src.split('/');
+    btn.title = parts.slice(-2).join('/');
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = '';
+    img.draggable = false;
+    btn.appendChild(img);
+    btn.addEventListener('click', () => {
+      const layer = getSelectedLayer();
+      if (!layer || layer.kind !== 'sticker') return;
+      changeStickerSrc(layer, src);
+    });
+    picker.appendChild(btn);
+  }
+}
+
+function changeStickerSrc(layer, src) {
+  if (layer.src === src) return;
+  layer.src = src;
+  layer.el.src = src;
+  // 新しい画像の自然サイズに合わせて高さを再計算(幅は維持)
+  const apply = () => {
+    const nw = layer.el.naturalWidth;
+    const nh = layer.el.naturalHeight;
+    if (nw && nh && layer.width) {
+      layer.height = layer.width * (nh / nw);
+      applyStickerStyle(layer);
+    }
+  };
+  if (layer.el.complete && layer.el.naturalWidth > 0) {
+    apply();
+  } else {
+    layer.el.addEventListener('load', apply, { once: true });
+  }
+  updateBubblePickerSelection(layer);
+}
+
+function updateBubblePickerSelection(layer) {
+  const picker = els.bubblePicker;
+  if (!picker) return;
+  for (const btn of picker.querySelectorAll('.bubble-thumb')) {
+    btn.classList.toggle('selected', btn.dataset.src === layer.src);
+  }
+}
+
+initBubblePicker();
 
 // --- PNG 書き出し ---
 // canvasWidth × canvasHeight の白いページに、コマ・素材・テキストを合成して PNG 化する。
