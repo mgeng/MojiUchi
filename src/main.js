@@ -62,6 +62,8 @@ const els = {
   propDelete: document.getElementById('propDelete'),
   stickerProps: document.getElementById('stickerProps'),
   stickerDelete: document.getElementById('stickerDelete'),
+  stickerFlipH: document.getElementById('stickerFlipH'),
+  stickerFlipV: document.getElementById('stickerFlipV'),
   bubblePicker: document.getElementById('bubblePicker'),
   memoToggle: document.getElementById('memoToggle'),
   memoPanel: document.getElementById('memoPanel'),
@@ -276,6 +278,7 @@ function refreshPageView() {
     }
   }
   applyAllLayerStyles();
+  syncStickerHandles();
   updateInspector();
 }
 
@@ -688,7 +691,10 @@ function switchToPage(index) {
   if (index < 0 || index >= state.pages.length) return;
   if (index === state.currentPageIndex) return;
   // いまのページのレイヤー DOM を退避(削除はしない、要素は残す)
-  for (const l of cur.layers) l.el.remove();
+  for (const l of cur.layers) {
+    if (l.kind === 'sticker') removeStickerHandles(l);
+    l.el.remove();
+  }
   state.currentPageIndex = index;
   cur = state.pages[index];
   refreshPageView();
@@ -1006,7 +1012,7 @@ function addTextLayer({ x, y, text = 'テキスト', font, size, orientation, li
 
 // 吹き出しステッカー(独立配置の画像レイヤー)。テキストレイヤー配列(cur.layers)に
 // 同居させて、選択/削除/Delete/矢印キー移動などの既存ロジックを再利用する。
-function addStickerLayer({ x, y, src, width, height }, targetPage = cur) {
+function addStickerLayer({ x, y, src, width, height, flipH, flipV }, targetPage = cur) {
   const id = targetPage.nextId++;
   const layer = {
     id,
@@ -1016,6 +1022,8 @@ function addStickerLayer({ x, y, src, width, height }, targetPage = cur) {
     y,
     width: width || 0,
     height: height || 0,
+    flipH: !!flipH,
+    flipV: !!flipV,
     el: null,
   };
   const el = document.createElement('img');
@@ -1109,6 +1117,114 @@ function applyStickerStyle(layer) {
   el.style.top = `${layer.y * scale}px`;
   el.style.width = `${(layer.width || 0) * scale}px`;
   el.style.height = `${(layer.height || 0) * scale}px`;
+  const sx = layer.flipH ? -1 : 1;
+  const sy = layer.flipV ? -1 : 1;
+  el.style.transform = (sx === 1 && sy === 1) ? '' : `scale(${sx}, ${sy})`;
+  positionStickerHandles(layer, scale);
+}
+
+const STICKER_HANDLE_CORNERS = ['nw', 'ne', 'sw', 'se'];
+const STICKER_MIN_SIZE = 20;
+
+function ensureStickerHandles(layer) {
+  if (!layer || layer.kind !== 'sticker' || layer.handles) return;
+  layer.handles = {};
+  for (const corner of STICKER_HANDLE_CORNERS) {
+    const h = document.createElement('div');
+    h.className = `sticker-handle sticker-handle-${corner}`;
+    attachStickerHandleDrag(layer, h, corner);
+    els.layerContainer.appendChild(h);
+    layer.handles[corner] = h;
+  }
+  applyStickerStyle(layer);
+}
+
+function removeStickerHandles(layer) {
+  if (!layer || !layer.handles) return;
+  for (const c of STICKER_HANDLE_CORNERS) {
+    if (layer.handles[c]) layer.handles[c].remove();
+  }
+  layer.handles = null;
+}
+
+function syncStickerHandles() {
+  const selected = getSelectedLayer();
+  for (const l of cur.layers) {
+    if (l.kind !== 'sticker') continue;
+    if (l === selected) ensureStickerHandles(l);
+    else removeStickerHandles(l);
+  }
+}
+
+function positionStickerHandles(layer, scale) {
+  if (!layer.handles) return;
+  const w = (layer.width || 0) * scale;
+  const h = (layer.height || 0) * scale;
+  const x = layer.x * scale;
+  const y = layer.y * scale;
+  const sz = 10;
+  const off = sz / 2;
+  const pos = {
+    nw: [x - off, y - off],
+    ne: [x + w - off, y - off],
+    sw: [x - off, y + h - off],
+    se: [x + w - off, y + h - off],
+  };
+  for (const c of STICKER_HANDLE_CORNERS) {
+    const el = layer.handles[c];
+    el.style.left = `${pos[c][0]}px`;
+    el.style.top = `${pos[c][1]}px`;
+  }
+}
+
+function attachStickerHandleDrag(layer, el, corner) {
+  el.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const rect = els.layerContainer.getBoundingClientRect();
+    const scaleX = cur.canvasWidth / rect.width;
+    const scaleY = cur.canvasHeight / rect.height;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const origX = layer.x;
+    const origY = layer.y;
+    const origW = layer.width;
+    const origH = layer.height;
+    const onMove = (ev) => {
+      const dx = (ev.clientX - startX) * scaleX;
+      const dy = (ev.clientY - startY) * scaleY;
+      let nx = origX, ny = origY, nw = origW, nh = origH;
+      if (corner === 'nw') {
+        nw = Math.max(STICKER_MIN_SIZE, origW - dx);
+        nh = Math.max(STICKER_MIN_SIZE, origH - dy);
+        nx = origX + (origW - nw);
+        ny = origY + (origH - nh);
+      } else if (corner === 'ne') {
+        nw = Math.max(STICKER_MIN_SIZE, origW + dx);
+        nh = Math.max(STICKER_MIN_SIZE, origH - dy);
+        ny = origY + (origH - nh);
+      } else if (corner === 'sw') {
+        nw = Math.max(STICKER_MIN_SIZE, origW - dx);
+        nh = Math.max(STICKER_MIN_SIZE, origH + dy);
+        nx = origX + (origW - nw);
+      } else {
+        nw = Math.max(STICKER_MIN_SIZE, origW + dx);
+        nh = Math.max(STICKER_MIN_SIZE, origH + dy);
+      }
+      layer.x = nx;
+      layer.y = ny;
+      layer.width = nw;
+      layer.height = nh;
+      applyStickerStyle(layer);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
 }
 
 // --- レイヤーのドラッグ・選択・編集 ---
@@ -1194,12 +1310,14 @@ function selectLayer(id) {
   cur.layers.forEach((l) => {
     l.el.classList.toggle('selected', l.id === id);
   });
+  syncStickerHandles();
   updateInspector();
 }
 
 function deselect() {
   cur.selectedId = null;
   cur.layers.forEach((l) => l.el.classList.remove('selected'));
+  syncStickerHandles();
   selectPanel(null);
   updateInspector();
 }
@@ -1229,6 +1347,7 @@ function isEditableTarget() {
 }
 
 function deleteLayer(layer) {
+  if (layer.kind === 'sticker') removeStickerHandles(layer);
   layer.el.remove();
   cur.layers = cur.layers.filter((l) => l.id !== layer.id);
   renderTextPreview();
@@ -1348,6 +1467,8 @@ function updateInspector() {
     els.textProps.hidden = true;
     els.stickerProps.hidden = false;
     updateBubblePickerSelection(layer);
+    els.stickerFlipH.classList.toggle('active', !!layer.flipH);
+    els.stickerFlipV.classList.toggle('active', !!layer.flipV);
     return;
   }
   els.stickerProps.hidden = true;
@@ -1408,6 +1529,22 @@ els.propDelete.addEventListener('click', () => {
   const layer = getSelectedLayer();
   if (!layer) return;
   deleteLayer(layer);
+});
+
+els.stickerFlipH.addEventListener('click', () => {
+  const layer = getSelectedLayer();
+  if (!layer || layer.kind !== 'sticker') return;
+  layer.flipH = !layer.flipH;
+  applyStickerStyle(layer);
+  els.stickerFlipH.classList.toggle('active', layer.flipH);
+});
+
+els.stickerFlipV.addEventListener('click', () => {
+  const layer = getSelectedLayer();
+  if (!layer || layer.kind !== 'sticker') return;
+  layer.flipV = !layer.flipV;
+  applyStickerStyle(layer);
+  els.stickerFlipV.classList.toggle('active', layer.flipV);
 });
 
 els.stickerDelete.addEventListener('click', () => {
@@ -1853,6 +1990,8 @@ function buildProjectData(page = cur) {
           y: l.y,
           width: l.width,
           height: l.height,
+          flipH: !!l.flipH,
+          flipV: !!l.flipV,
         };
       }
       return {
@@ -1882,6 +2021,8 @@ function applyProjectData(data, targetPage = cur) {
         src: typeof l.src === 'string' ? l.src : STICKER_DEFAULT_SRC,
         width: typeof l.width === 'number' ? l.width : 0,
         height: typeof l.height === 'number' ? l.height : 0,
+        flipH: !!l.flipH,
+        flipV: !!l.flipV,
       }, targetPage);
       continue;
     }
@@ -2258,7 +2399,19 @@ els.exportBtn.addEventListener('click', async () => {
       if (layer.kind === 'sticker') {
         const img = stickerImgs[i];
         if (img && layer.width > 0 && layer.height > 0) {
-          ctx.drawImage(img, layer.x, layer.y, layer.width, layer.height);
+          if (layer.flipH || layer.flipV) {
+            const sx = layer.flipH ? -1 : 1;
+            const sy = layer.flipV ? -1 : 1;
+            const tx = layer.x + (layer.flipH ? layer.width : 0);
+            const ty = layer.y + (layer.flipV ? layer.height : 0);
+            ctx.save();
+            ctx.translate(tx, ty);
+            ctx.scale(sx, sy);
+            ctx.drawImage(img, 0, 0, layer.width, layer.height);
+            ctx.restore();
+          } else {
+            ctx.drawImage(img, layer.x, layer.y, layer.width, layer.height);
+          }
         }
       } else {
         drawTextLayer(ctx, layer);

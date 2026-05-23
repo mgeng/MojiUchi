@@ -91,6 +91,11 @@ header h1 {
   background: #b22;
 }
 
+.btn.active {
+  background: #14418f;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
 #app {
   flex: 1 1 auto;
   display: grid;
@@ -284,6 +289,22 @@ header h1 {
 .sticker-layer.selected {
   outline-color: #2a6df4;
 }
+
+/* 吹き出しの四隅リサイズハンドル */
+.sticker-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border: 1px solid #2a6df4;
+  box-sizing: border-box;
+  pointer-events: auto;
+  z-index: 10;
+}
+.sticker-handle-nw { cursor: nwse-resize; }
+.sticker-handle-ne { cursor: nesw-resize; }
+.sticker-handle-sw { cursor: nesw-resize; }
+.sticker-handle-se { cursor: nwse-resize; }
 
 /* 吹き出しピッカー: サムネイル一覧から形状を選択 */
 .bubble-picker {
