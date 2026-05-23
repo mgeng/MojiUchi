@@ -1759,6 +1759,24 @@ function loadImageElement(src) {
   });
 }
 
+// PNG書き出し用。アセット由来の <img>(assets/bubbles/...) を直接 drawImage すると
+// オリジンによっては canvas が tainted になり toBlob が失敗するので、
+// 一度 fetch → dataURL に正規化してから Image にロードする。dataURL はキャッシュ。
+const _imageDataUrlCache = new Map();
+async function loadImageForCanvas(src) {
+  if (!src) throw new Error('画像のソースがありません');
+  if (src.startsWith('data:')) return loadImageElement(src);
+  let dataUrl = _imageDataUrlCache.get(src);
+  if (!dataUrl) {
+    const res = await fetch(src);
+    if (!res.ok) throw new Error(`画像取得に失敗: ${src} (${res.status})`);
+    const blob = await res.blob();
+    dataUrl = await blobToDataUrl(blob);
+    _imageDataUrlCache.set(src, dataUrl);
+  }
+  return loadImageElement(dataUrl);
+}
+
 // renderPanels と同じピクセル矩形を canvas 用に再現する。
 // gutter は panel 同士の間に「フル gutter」、外周には「ハーフ gutter」入る CSS と同じレイアウト。
 function computePanelPixelRect(panel, pageW, pageH, gutterPx) {
@@ -2575,8 +2593,9 @@ els.exportBtn.addEventListener('click', async () => {
     ctx.fillRect(0, 0, pageW, pageH);
     await drawPanelsAndMaterials(ctx, cur, pageW, pageH);
     // 画像系レイヤー(overlay / sticker)を並列ロード。
+    // sticker はアセットパス由来なので tainted を避けるため fetch→dataURL 経由で読む。
     const layerImgs = await Promise.all(
-      cur.layers.map((l) => (isStickerLike(l) ? loadImageElement(l.src).catch(() => null) : null))
+      cur.layers.map((l) => (isStickerLike(l) ? loadImageForCanvas(l.src).catch(() => null) : null))
     );
     const drawImageLayer = (layer, img) => {
       if (!img || !(layer.width > 0 && layer.height > 0)) return;
