@@ -34,6 +34,7 @@ registerFonts();
 
 const els = {
   fileInput: document.getElementById('fileInput'),
+  openBtn: document.getElementById('openBtn'),
   exportBtn: document.getElementById('exportBtn'),
   stageWrapper: document.getElementById('stageWrapper'),
   stage: document.getElementById('stage'),
@@ -212,7 +213,16 @@ function createEmptyPage() {
 const state = {
   pages: Array.from({ length: MAX_PAGES }, createEmptyPage),
   currentPageIndex: 0,
+  // 上書き保存用。showSaveFilePicker / showOpenFilePicker で得たハンドルを保持する。
+  // フォールバック（<input type=file>）経由で開いた場合は fileName だけ入って handle は null。
+  fileHandle: null,
+  fileName: null,
 };
+
+const BASE_DOC_TITLE = document.title;
+function updateDocumentTitle() {
+  document.title = state.fileName ? `${state.fileName} - ${BASE_DOC_TITLE}` : BASE_DOC_TITLE;
+}
 
 let cur = state.pages[0];
 
@@ -793,6 +803,40 @@ els.fileInput.addEventListener('change', (e) => {
   els.fileInput.value = '';
 });
 
+// 「開く」ボタン。showOpenFilePicker が使えればハンドル付きで開く（→ 以降 Ctrl+S で上書き保存可能）。
+// 非対応ブラウザは従来通り <input type=file> にフォールバック。
+async function openProject() {
+  if (window.showOpenFilePicker) {
+    let handle;
+    try {
+      [handle] = await window.showOpenFilePicker({
+        types: [
+          { description: 'Gina プロジェクト', accept: { 'application/zip': [BUNDLE_EXT] } },
+          { description: 'メモ', accept: { 'text/plain': ['.txt'] } },
+        ],
+        multiple: false,
+      });
+    } catch (err) {
+      if (err && err.name === 'AbortError') return; // ユーザーキャンセル
+      console.warn('showOpenFilePicker が使えなかったので <input type=file> に切り替えます:', err);
+      els.fileInput.click();
+      return;
+    }
+    const file = await handle.getFile();
+    const kind = detectFileKind(file);
+    if (kind === 'bundle') {
+      loadBundleFile(file, handle);
+    } else {
+      // .mj 以外はハンドル不要（上書き保存対象ではない）
+      openFile(file);
+    }
+    return;
+  }
+  els.fileInput.click();
+}
+
+els.openBtn.addEventListener('click', openProject);
+
 els.stageWrapper.addEventListener('dragover', (e) => {
   e.preventDefault();
   els.stageWrapper.classList.add('dragover');
@@ -907,16 +951,21 @@ document.addEventListener('keydown', (e) => {
 
 // Ctrl(または Cmd)+S/O/E のグローバルショートカット。
 // ブラウザ標準動作(ページ保存・ファイル選択)を抑止して各ボタンに割り当てる。
+// Ctrl+S = 上書き保存（ハンドル有なら無確認、無ければダイアログ） / Ctrl+Shift+S = 名前を付けて保存。
 document.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
-  if (e.altKey || e.shiftKey) return;
+  if (e.altKey) return;
   const key = e.key.toLowerCase();
   if (key === 's') {
     e.preventDefault();
-    if (!els.saveProjectBtn.disabled) els.saveProjectBtn.click();
-  } else if (key === 'o') {
+    if (!anyPageHasContent()) return;
+    saveProject({ saveAs: e.shiftKey });
+    return;
+  }
+  if (e.shiftKey) return; // 以降の O / E は Shift 付きでは反応しない
+  if (key === 'o') {
     e.preventDefault();
-    els.fileInput.click();
+    openProject();
   } else if (key === 'e') {
     e.preventDefault();
     if (!els.exportBtn.disabled) els.exportBtn.click();
@@ -1919,23 +1968,49 @@ async function buildBundleBlob() {
   return zip.generateAsync({ type: 'blob', compression: 'STORE' });
 }
 
-els.saveProjectBtn.addEventListener('click', async () => {
+// .mj プロジェクトの保存。
+// - saveAs=false かつ state.fileHandle あり → ダイアログ無しで上書き保存
+// - saveAs=true または state.fileHandle なし → showSaveFilePicker でハンドルを取得して書き込み、
+//                                                  以降の保存はその場所への上書きになる
+// - showSaveFilePicker 非対応ブラウザ → 従来通りダウンロード（毎回新規ファイル）
+async function saveProject({ saveAs = false } = {}) {
   if (!anyPageHasContent()) return;
   els.saveProjectBtn.disabled = true;
   try {
     const blob = await buildBundleBlob();
-    await saveBlob(blob, 'gina.mj', {
-      description: 'Gina プロジェクト',
-      mimeType: 'application/zip',
-      extension: BUNDLE_EXT,
-    });
+    let handle = saveAs ? null : state.fileHandle;
+    if (!handle && window.showSaveFilePicker) {
+      try {
+        handle = await window.showSaveFilePicker({
+          suggestedName: state.fileName || 'gina.mj',
+          types: [{ description: 'Gina プロジェクト', accept: { 'application/zip': [BUNDLE_EXT] } }],
+        });
+      } catch (err) {
+        if (err && err.name === 'AbortError') return; // ユーザーキャンセル
+        console.warn('showSaveFilePicker が使えなかったのでダウンロードに切り替えます:', err);
+        handle = null;
+      }
+    }
+    if (handle) {
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      state.fileHandle = handle;
+      state.fileName = handle.name || state.fileName || 'gina.mj';
+      updateDocumentTitle();
+    } else {
+      // フォールバック: ダウンロードフォルダへ新規ファイル保存
+      downloadBlob(blob, state.fileName || 'gina.mj');
+    }
   } catch (err) {
     console.error(err);
     alert('保存に失敗しました: ' + (err && err.message ? err.message : err));
   } finally {
     els.saveProjectBtn.disabled = !anyPageHasContent();
   }
-});
+}
+
+els.saveProjectBtn.addEventListener('click', () => saveProject());
 
 function resetAllPagesForBundle() {
   // 表示中ページの DOM をクリア
@@ -2015,7 +2090,7 @@ async function loadPageFromBundle(pageIndex, entries) {
   }
 }
 
-async function loadBundleFile(file) {
+async function loadBundleFile(file, handle = null) {
   if (typeof JSZip === 'undefined') {
     alert('JSZip ライブラリが読み込まれていません');
     return;
@@ -2029,6 +2104,12 @@ async function loadBundleFile(file) {
   }
 
   if (anyPageHasContent() && !confirm('現在のページ・テキスト・メモ・コマ割りをすべて置き換えます。よろしいですか?')) return;
+
+  // 取り込み成立。以降の Ctrl+S は「開いたファイルへの上書き」になるよう状態を更新。
+  // フォールバック（<input type=file>）経由では handle が来ないので名前だけ更新。
+  state.fileHandle = handle;
+  state.fileName = file.name || state.fileName || null;
+  updateDocumentTitle();
 
   // pages/N/... の新形式のみを読む（漫画全体画像のエントリは検出したら warn して捨てる）。
   const pageEntries = [];
