@@ -828,8 +828,13 @@ async function openProject() {
     try {
       [handle] = await window.showOpenFilePicker({
         types: [
-          { description: 'Gina プロジェクト', accept: { 'application/zip': [BUNDLE_EXT] } },
-          { description: 'メモ', accept: { 'text/plain': ['.txt'] } },
+          {
+            description: 'Gina プロジェクト / メモ',
+            accept: {
+              'application/zip': [BUNDLE_EXT],
+              'text/plain': ['.txt'],
+            },
+          },
         ],
         multiple: false,
       });
