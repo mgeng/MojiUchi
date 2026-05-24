@@ -1767,17 +1767,23 @@ function loadImageElement(src) {
 // PNG書き出し用。アセット由来の <img>(assets/bubbles/...) を直接 drawImage すると
 // オリジンによっては canvas が tainted になり toBlob が失敗するので、
 // 一度 fetch → dataURL に正規化してから Image にロードする。dataURL はキャッシュ。
+// ただし file:// で開いた場合は fetch が CORS で拒否されるため、その時は <img> 直接ロードに
+// フォールバックする(同一オリジン画像なので tainted にはならない)。
 const _imageDataUrlCache = new Map();
 async function loadImageForCanvas(src) {
   if (!src) throw new Error('画像のソースがありません');
   if (src.startsWith('data:')) return loadImageElement(src);
   let dataUrl = _imageDataUrlCache.get(src);
   if (!dataUrl) {
-    const res = await fetch(src);
-    if (!res.ok) throw new Error(`画像取得に失敗: ${src} (${res.status})`);
-    const blob = await res.blob();
-    dataUrl = await blobToDataUrl(blob);
-    _imageDataUrlCache.set(src, dataUrl);
+    try {
+      const res = await fetch(src);
+      if (!res.ok) throw new Error(`画像取得に失敗: ${src} (${res.status})`);
+      const blob = await res.blob();
+      dataUrl = await blobToDataUrl(blob);
+      _imageDataUrlCache.set(src, dataUrl);
+    } catch (err) {
+      return loadImageElement(src);
+    }
   }
   return loadImageElement(dataUrl);
 }
