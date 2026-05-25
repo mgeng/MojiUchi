@@ -962,18 +962,32 @@ els.contextMenu.addEventListener('click', (e) => {
   } else if (action === 'add-bubble') {
     const { x, y } = contextMenuTargetCoords;
     addStickerLayer({ x, y, src: STICKER_DEFAULT_SRC });
-    // 吹き出しの中央付近に縦書きテキストを同時追加する。bubble 画像の高さは
-    // ロード後にしか確定しないので、既定の縦オーバル吹き出しが概ね正方形である
-    // ことを前提に STICKER_DEFAULT_WIDTH を高さ代用にして中央へ寄せる。
+    // 吹き出しの中央付近にテキストを同時追加する。文字組みは右側パネルの
+    // 直前選択値(propOrientation)に従う。bubble 画像の高さはロード後にしか
+    // 確定しないため、既定の縦オーバル(ほぼ正方形)前提で STICKER_DEFAULT_WIDTH
+    // を縦横ともに代用して中央へ寄せる。
+    const orientation = els.propOrientation.value === 'vertical' ? 'vertical' : 'horizontal';
     const DEFAULT_TEXT = 'テキスト';
     const DEFAULT_SIZE = 24;
     const DEFAULT_LINE_HEIGHT = 1.1;
-    const textHeightEstimate = DEFAULT_SIZE * DEFAULT_LINE_HEIGHT * [...DEFAULT_TEXT].length;
-    addTextLayer({
-      x: x + STICKER_DEFAULT_WIDTH / 2,
-      y: y + STICKER_DEFAULT_WIDTH / 2 - textHeightEstimate / 2,
-      orientation: 'vertical',
-    });
+    const charCount = [...DEFAULT_TEXT].length;
+    const bubbleCenterX = x + STICKER_DEFAULT_WIDTH / 2;
+    const bubbleCenterY = y + STICKER_DEFAULT_WIDTH / 2;
+    let textX;
+    let textY;
+    if (orientation === 'vertical') {
+      // 縦書き 1 列の場合、layer.x は列の左端 (列中心 = layer.x + size/2)
+      const textHeight = DEFAULT_SIZE * DEFAULT_LINE_HEIGHT * charCount;
+      textX = bubbleCenterX - DEFAULT_SIZE / 2;
+      textY = bubbleCenterY - textHeight / 2;
+    } else {
+      // 横書きは layer.x が左上。日本語全角は概ね 1em 幅として概算
+      const textWidth = DEFAULT_SIZE * charCount;
+      const textHeight = DEFAULT_SIZE * DEFAULT_LINE_HEIGHT;
+      textX = bubbleCenterX - textWidth / 2;
+      textY = bubbleCenterY - textHeight / 2;
+    }
+    addTextLayer({ x: textX, y: textY, orientation });
   } else if (action === 'add-overlay') {
     pendingOverlayCoords = { ...contextMenuTargetCoords };
     els.overlayFileInput.value = '';
