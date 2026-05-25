@@ -960,7 +960,20 @@ els.contextMenu.addEventListener('click', (e) => {
   } else if (action === 'add-monologue') {
     addTextLayer({ x: contextMenuTargetCoords.x, y: contextMenuTargetCoords.y, kind: 'monologue' });
   } else if (action === 'add-bubble') {
-    addStickerLayer({ x: contextMenuTargetCoords.x, y: contextMenuTargetCoords.y, src: STICKER_DEFAULT_SRC });
+    const { x, y } = contextMenuTargetCoords;
+    addStickerLayer({ x, y, src: STICKER_DEFAULT_SRC });
+    // 吹き出しの中央付近に縦書きテキストを同時追加する。bubble 画像の高さは
+    // ロード後にしか確定しないので、既定の縦オーバル吹き出しが概ね正方形である
+    // ことを前提に STICKER_DEFAULT_WIDTH を高さ代用にして中央へ寄せる。
+    const DEFAULT_TEXT = 'テキスト';
+    const DEFAULT_SIZE = 24;
+    const DEFAULT_LINE_HEIGHT = 1.1;
+    const textHeightEstimate = DEFAULT_SIZE * DEFAULT_LINE_HEIGHT * [...DEFAULT_TEXT].length;
+    addTextLayer({
+      x: x + STICKER_DEFAULT_WIDTH / 2,
+      y: y + STICKER_DEFAULT_WIDTH / 2 - textHeightEstimate / 2,
+      orientation: 'vertical',
+    });
   } else if (action === 'add-overlay') {
     pendingOverlayCoords = { ...contextMenuTargetCoords };
     els.overlayFileInput.value = '';
