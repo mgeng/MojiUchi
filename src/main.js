@@ -1503,6 +1503,134 @@ function deleteLayer(layer) {
   updateActionButtons();
 }
 
+// Ctrl+C/V 用のクリップボード。アプリ内専用(OS クリップボードは経由しない)。
+// el は除外し、addXxxLayer に渡せる素のデータだけ保持する。
+// kind は 'text' / 'sticker' / 'overlay' のいずれか(text には monologue サブ種別を含む)。
+let clipboard = null;
+const PASTE_OFFSET = 20;
+
+function serializeTextLayer(layer) {
+  return {
+    text: layer.text,
+    x: layer.x, y: layer.y,
+    font: layer.font,
+    size: layer.size,
+    orientation: layer.orientation,
+    lineHeight: layer.lineHeight,
+    kind: layer.kind, // 'text' または 'monologue'
+  };
+}
+
+// 吹き出し(sticker)の矩形内に基準点を持つ text/monologue レイヤーを抽出する。
+// add-bubble は吹き出し中央付近にテキストを置く設計なので、layer.x/y が矩形に
+// 入っているかの簡易判定で実用上の「中身」を拾える(尾の上に偶然乗っているテキストは
+// 巻き込みうるが、許容)。
+function findTextChildrenInSticker(sticker, page = cur) {
+  if (!sticker.width || !sticker.height) return [];
+  const x0 = sticker.x;
+  const y0 = sticker.y;
+  const x1 = sticker.x + sticker.width;
+  const y1 = sticker.y + sticker.height;
+  return page.layers.filter((l) => {
+    if (l.kind !== 'text' && l.kind !== 'monologue') return false;
+    return l.x >= x0 && l.x <= x1 && l.y >= y0 && l.y <= y1;
+  });
+}
+
+function copySelectedLayer() {
+  const layer = getSelectedLayer();
+  if (!layer) return false;
+  if (layer.kind === 'overlay') {
+    clipboard = {
+      kind: 'overlay',
+      data: {
+        src: layer.src,
+        x: layer.x, y: layer.y,
+        width: layer.width, height: layer.height,
+        naturalWidth: layer.naturalWidth, naturalHeight: layer.naturalHeight,
+        flipH: layer.flipH, flipV: layer.flipV,
+      },
+    };
+  } else if (layer.kind === 'sticker') {
+    clipboard = {
+      kind: 'sticker',
+      data: {
+        src: layer.src,
+        x: layer.x, y: layer.y,
+        width: layer.width, height: layer.height,
+        flipH: layer.flipH, flipV: layer.flipV,
+      },
+      // 吹き出しに内包されているテキストも一緒に複製する
+      children: findTextChildrenInSticker(layer).map(serializeTextLayer),
+    };
+  } else {
+    clipboard = {
+      kind: 'text',
+      data: serializeTextLayer(layer),
+    };
+  }
+  return true;
+}
+
+function pasteFromClipboard() {
+  if (!clipboard) return false;
+  // 連続ペーストで重ならないよう、保存座標を毎回ずらす。
+  // 子テキストにも同じオフセットを適用して相対位置を維持する。
+  clipboard.data.x += PASTE_OFFSET;
+  clipboard.data.y += PASTE_OFFSET;
+  if (clipboard.children) {
+    for (const c of clipboard.children) {
+      c.x += PASTE_OFFSET;
+      c.y += PASTE_OFFSET;
+    }
+  }
+  const d = clipboard.data;
+  if (clipboard.kind === 'text') {
+    addTextLayer({
+      x: d.x, y: d.y,
+      text: d.text,
+      font: d.font,
+      size: d.size,
+      orientation: d.orientation,
+      lineHeight: d.lineHeight,
+      kind: d.kind,
+    });
+  } else if (clipboard.kind === 'sticker') {
+    addStickerLayer({
+      x: d.x, y: d.y,
+      src: d.src,
+      width: d.width, height: d.height,
+      flipH: d.flipH, flipV: d.flipV,
+    });
+    // addStickerLayer 内で push & selectLayer 済み。直後の layers 末尾 = 追加した sticker。
+    const newStickerId = cur.layers[cur.layers.length - 1].id;
+    if (clipboard.children && clipboard.children.length) {
+      for (const c of clipboard.children) {
+        addTextLayer({
+          x: c.x, y: c.y,
+          text: c.text,
+          font: c.font,
+          size: c.size,
+          orientation: c.orientation,
+          lineHeight: c.lineHeight,
+          kind: c.kind,
+        });
+      }
+      // 子テキストの addTextLayer が選択を奪うので、最後に吹き出しを再選択しておく
+      selectLayer(newStickerId);
+    }
+  } else if (clipboard.kind === 'overlay') {
+    addOverlayLayer({
+      x: d.x, y: d.y,
+      src: d.src,
+      width: d.width, height: d.height,
+      naturalWidth: d.naturalWidth, naturalHeight: d.naturalHeight,
+      flipH: d.flipH, flipV: d.flipV,
+    });
+  }
+  return true;
+}
+
 document.addEventListener('keydown', (e) => {
   if (isEditableTarget()) return;
 
@@ -1511,6 +1639,19 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     switchToPage(state.currentPageIndex + (e.key === 'ArrowRight' ? 1 : -1));
     return;
+  }
+
+  // Ctrl+C: 選択中レイヤーをコピー / Ctrl+V: 現在ページに複製
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+    const k = e.key.toLowerCase();
+    if (k === 'c') {
+      if (copySelectedLayer()) e.preventDefault();
+      return;
+    }
+    if (k === 'v') {
+      if (pasteFromClipboard()) e.preventDefault();
+      return;
+    }
   }
 
   // パネル選択中（テキスト/ステッカー未選択）に Delete でコマ削除。
