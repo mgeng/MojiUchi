@@ -173,6 +173,8 @@ const BUBBLE_CATALOG = [
     'bubble-09-poly-marked', 'bubble-10-dashed-poly',
     'bubble-11-long-oval', 'bubble-12-long-oval-2', 'bubble-13-long-oval-3',
     'bubble-14-long-oval-tail', 'bubble-15-long-rect', 'bubble-16-long-rect-dashed',
+    'bubble-17-oval-tail-bl', 'bubble-18-oval-tail-l-thin', 'bubble-19-oval-tail-l-wide',
+    'bubble-20-oval-tail-tl', 'bubble-21-oval-tail-t',
   ].map((n) => `assets/bubbles/horizontal/${n}.png`),
 ];
 const STICKER_DEFAULT_WIDTH = 280; // ページ座標での初期表示幅
