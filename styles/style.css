@@ -168,6 +168,9 @@ header h1 {
   box-sizing: border-box;
   background: rgba(255, 255, 255, 0.02);
   overflow: hidden;
+  /* .panel-focus の mix-blend-mode: multiply を、コマ素材に対してだけ効かせるために
+     コマ単位で独立した合成コンテキストを作る */
+  isolation: isolate;
   cursor: pointer;
   pointer-events: auto;
 }
@@ -206,6 +209,19 @@ header h1 {
   -webkit-user-drag: none;
   transform-origin: center;
   max-width: none;
+}
+
+/* 集中線。コマ素材 (.panel-material) の上、レイヤー (吹き出し/テキスト) より下に重なる。
+   .panel の overflow: hidden により枠外は自動でトリミングされる。
+   素材の黒地は乗算合成で透過させ、線だけがコマ素材の上に乗るようにする。 */
+.panel-focus {
+  position: absolute;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  transform-origin: center;
+  max-width: none;
+  mix-blend-mode: multiply;
 }
 
 
@@ -345,6 +361,46 @@ header h1 {
   max-height: 100%;
   object-fit: contain;
   pointer-events: none;
+}
+
+/* 集中線ピッカー: ピッカー枠は bubble-picker と共有しつつ、サムネは縦に長い 16:9 寄りで見せる */
+.focus-picker {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.focus-picker .bubble-thumb {
+  aspect-ratio: 3 / 2;
+  background: #333; /* 集中線は暗い背景なので薄い灰で囲う */
+}
+
+/* 「なし」サムネ。画像の代わりにテキストを表示する */
+.bubble-thumb.thumb-empty {
+  background: #fff;
+  color: #666;
+  font-size: 12px;
+}
+
+/* ピッカー上部のタブ。今は集中線 1 タブだが、将来の拡張に備えてレイアウトだけ用意 */
+.picker-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.picker-tab {
+  border: 1px solid #ddd;
+  background: #f4f4f4;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+}
+
+.picker-tab.selected {
+  background: #fff;
+  border-color: #2a6df4;
+  color: #2a6df4;
+  font-weight: 600;
 }
 
 .inspector {

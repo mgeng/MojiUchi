@@ -51,6 +51,13 @@ const els = {
   panelMaterialProps: document.getElementById('panelMaterialProps'),
   materialResetBtn: document.getElementById('materialResetBtn'),
   materialRemoveBtn: document.getElementById('materialRemoveBtn'),
+  panelFocusProps: document.getElementById('panelFocusProps'),
+  focusPicker: document.getElementById('focusPicker'),
+  focusScaleInput: document.getElementById('focusScaleInput'),
+  focusScaleValue: document.getElementById('focusScaleValue'),
+  focusRotationInput: document.getElementById('focusRotationInput'),
+  focusRotationValue: document.getElementById('focusRotationValue'),
+  focusResetBtn: document.getElementById('focusResetBtn'),
   textProps: document.getElementById('textProps'),
   propText: document.getElementById('propText'),
   propFont: document.getElementById('propFont'),
@@ -136,6 +143,23 @@ const MONOLOGUE_BORDER = 2;
 // 吹き出しステッカー(画像)の既定値
 const STICKER_DEFAULT_SRC = 'assets/bubbles/vertical/bubble-01-oval.png';
 
+// 集中線(コマに被せる効果線)のサムネ一覧。コマ単位で 1 枚を差し替え式で持つ。
+// blend は素材ごとの合成モード:
+//   'multiply' = 暗い線+暗い背景の素材を「コマの周囲を暗く落とす」効果として使う
+//   'screen'   = 明るい線+暗い背景の素材を「コマに白い光線を被せる」効果として使う
+const FOCUS_CATALOG = [
+  { src: 'assets/focus-lines/focus-01.png', blend: 'multiply' },
+  { src: 'assets/focus-lines/focus-02.png', blend: 'multiply' },
+  { src: 'assets/focus-lines/focus-03.png', blend: 'screen' },
+];
+const FOCUS_SCALE_MIN = 0.5;
+const FOCUS_SCALE_MAX = 3.0;
+
+function getFocusBlend(src) {
+  const item = FOCUS_CATALOG.find((c) => c.src === src);
+  return (item && item.blend) || 'multiply';
+}
+
 // 吹き出しピッカーに並べる候補。vertical と horizontal の両方を一覧表示する。
 const BUBBLE_CATALOG = [
   ...[
@@ -201,7 +225,7 @@ function createEmptyPage() {
     nextId: 1,
     memo: '',
     template: DEFAULT_TEMPLATE,
-    panels: [], // { id, x, y, w, h, material } 0-1 正規化
+    panels: [], // { id, x, y, w, h, material, focus } 0-1 正規化
     nextPanelId: 1,
     selectedPanelId: null,
     canvasWidth: DEFAULT_CANVAS_WIDTH,
@@ -212,6 +236,7 @@ function createEmptyPage() {
     id: page.nextPanelId++,
     x: p.x, y: p.y, w: p.w, h: p.h,
     material: null,
+    focus: null,
   }));
   return page;
 }
@@ -235,7 +260,7 @@ let cur = state.pages[0];
 // 何か書き出す/保存する価値があるかどうか。コマ割りは常に存在する前提なので、
 // 「素材かテキストが何か置かれているか」で判定する。
 function hasPageContent(page) {
-  return page.panels.some((p) => p.material) || page.layers.length > 0;
+  return page.panels.some((p) => p.material || p.focus) || page.layers.length > 0;
 }
 
 function isPageEmpty(page) {
@@ -420,6 +445,8 @@ function startEdgeDrag(panel, edge, startEvent) {
         applyPanelLayoutStyle(el, s.panel);
         const img = el.querySelector('.panel-material');
         if (img) applyMaterialTransform(img, s.panel, el);
+        const fimg = el.querySelector('.panel-focus');
+        if (fimg) applyFocusTransform(fimg, s.panel, el);
       }
     }
   };
@@ -463,6 +490,47 @@ function mountMaterialOnPanel(panelEl, panel) {
   applyMaterialTransform(img, panel, panelEl);
   // 初回レンダ時にコマがまだ 0 サイズだったケースに備えて次フレームで再適用
   requestAnimationFrame(() => applyMaterialTransform(img, panel, panelEl));
+}
+
+// 集中線 img を「コマ全体を contain(コマに収まる最小スケール) フィット」を基準に、
+// user の scale/rotation で動かす。位置は中央固定(tx/ty 無し)。コマの overflow:hidden
+// で枠外がトリミングされる。
+function applyFocusTransform(img, panel, panelEl) {
+  const f = panel.focus;
+  if (!f) return;
+  const pw = panelEl.clientWidth;
+  const ph = panelEl.clientHeight;
+  const nw = img.naturalWidth || 0;
+  const nh = img.naturalHeight || 0;
+  if (pw === 0 || ph === 0 || nw === 0 || nh === 0) return;
+  // 集中線素材は中央が抜けたデザイン。コマを覆い切る cover フィットを基準に、
+  // 任意の scale を掛ける。
+  const coverScale = Math.max(pw / nw, ph / nh);
+  const finalW = nw * coverScale * (f.scale || 1);
+  const finalH = nh * coverScale * (f.scale || 1);
+  const cx = pw / 2;
+  const cy = ph / 2;
+  img.style.width = `${finalW}px`;
+  img.style.height = `${finalH}px`;
+  img.style.left = `${cx - finalW / 2}px`;
+  img.style.top = `${cy - finalH / 2}px`;
+  img.style.transform = `rotate(${f.rotation || 0}deg)`;
+}
+
+function mountFocusOnPanel(panelEl, panel) {
+  if (!panel.focus) return;
+  const img = document.createElement('img');
+  img.className = 'panel-focus';
+  img.src = panel.focus.src;
+  img.draggable = false;
+  // 素材ごとに合成モードが違うため、インラインで上書きする
+  img.style.mixBlendMode = getFocusBlend(panel.focus.src);
+  panelEl.appendChild(img);
+  // natural size が確定してから transform を当てる必要があるため、load を待つ。
+  const apply = () => applyFocusTransform(img, panel, panelEl);
+  if (img.complete && img.naturalWidth > 0) apply();
+  else img.addEventListener('load', apply, { once: true });
+  requestAnimationFrame(apply);
 }
 
 function findPanelAtClientPoint(clientX, clientY) {
@@ -586,6 +654,7 @@ function renderPanels() {
     }, { passive: false });
     els.panelContainer.appendChild(el);
     mountMaterialOnPanel(el, p);
+    mountFocusOnPanel(el, p);
   }
   updatePanelControls();
 }
@@ -619,6 +688,8 @@ function updatePanelControls() {
   els.splitLeftRightBtn.disabled = !hasSelection;
   els.deletePanelBtn.disabled = !canDeletePanel(sel);
   els.panelMaterialProps.hidden = !(hasSelection && sel.material);
+  els.panelFocusProps.hidden = !hasSelection;
+  updateFocusControls();
 }
 
 function getSelectedPanel() {
@@ -674,11 +745,11 @@ function splitSelectedPanel(direction) {
   // 素材は元コマ（先頭側）にだけ引き継ぐ。もう一方は空のコマになる。
   let a, b;
   if (direction === 'topBottom') {
-    a = { id: cur.nextPanelId++, x: panel.x, y: panel.y,             w: panel.w, h: panel.h / 2, material: panel.material };
-    b = { id: cur.nextPanelId++, x: panel.x, y: panel.y + panel.h / 2, w: panel.w, h: panel.h / 2, material: null };
+    a = { id: cur.nextPanelId++, x: panel.x, y: panel.y,             w: panel.w, h: panel.h / 2, material: panel.material, focus: panel.focus };
+    b = { id: cur.nextPanelId++, x: panel.x, y: panel.y + panel.h / 2, w: panel.w, h: panel.h / 2, material: null, focus: null };
   } else {
-    a = { id: cur.nextPanelId++, x: panel.x,             y: panel.y, w: panel.w / 2, h: panel.h, material: panel.material };
-    b = { id: cur.nextPanelId++, x: panel.x + panel.w / 2, y: panel.y, w: panel.w / 2, h: panel.h, material: null };
+    a = { id: cur.nextPanelId++, x: panel.x,             y: panel.y, w: panel.w / 2, h: panel.h, material: panel.material, focus: panel.focus };
+    b = { id: cur.nextPanelId++, x: panel.x + panel.w / 2, y: panel.y, w: panel.w / 2, h: panel.h, material: null, focus: null };
   }
   cur.panels.splice(idx, 1, a, b);
   cur.selectedPanelId = a.id;
@@ -693,6 +764,7 @@ function applyTemplate(templateId) {
     id: cur.nextPanelId++,
     x: p.x, y: p.y, w: p.w, h: p.h,
     material: null,
+    focus: null,
   }));
   cur.selectedPanelId = null;
   refreshPageView();
@@ -1907,6 +1979,118 @@ function updateBubblePickerSelection(layer) {
 
 initBubblePicker();
 
+// --- 集中線ピッカー(コマ単位で 1 枚を差し替え) ---
+
+function initFocusPicker() {
+  const picker = els.focusPicker;
+  if (!picker) return;
+  // 先頭に「なし」サムネを置き、続けて FOCUS_CATALOG のサムネを並べる
+  const emptyBtn = document.createElement('button');
+  emptyBtn.type = 'button';
+  emptyBtn.className = 'bubble-thumb thumb-empty';
+  emptyBtn.dataset.src = '';
+  emptyBtn.textContent = 'なし';
+  emptyBtn.title = '集中線を外す';
+  emptyBtn.addEventListener('click', () => applyFocusPick(''));
+  picker.appendChild(emptyBtn);
+  for (const item of FOCUS_CATALOG) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'bubble-thumb';
+    btn.dataset.src = item.src;
+    const parts = item.src.split('/');
+    btn.title = parts[parts.length - 1];
+    const img = document.createElement('img');
+    img.src = item.src;
+    img.alt = '';
+    img.draggable = false;
+    btn.appendChild(img);
+    btn.addEventListener('click', () => applyFocusPick(item.src));
+    picker.appendChild(btn);
+  }
+}
+
+function applyFocusPick(src) {
+  const sel = getSelectedPanel();
+  if (!sel) return;
+  if (!src) {
+    sel.focus = null;
+  } else if (sel.focus && sel.focus.src === src) {
+    return; // 同じ素材を選んだだけ、何もしない
+  } else if (sel.focus) {
+    sel.focus.src = src;
+  } else {
+    sel.focus = { src, scale: 1, rotation: 0 };
+  }
+  rerenderPanelFocus(sel);
+  updateFocusControls();
+  updateActionButtons();
+}
+
+// 選択中コマの集中線 img を張り替える。コマ DOM 自体は維持して .panel-focus だけ差し替える。
+function rerenderPanelFocus(panel) {
+  const el = els.panelContainer.querySelector(`[data-panel-id="${panel.id}"]`);
+  if (!el) return;
+  const old = el.querySelector('.panel-focus');
+  if (old) old.remove();
+  mountFocusOnPanel(el, panel);
+}
+
+function updateFocusControls() {
+  const sel = getSelectedPanel();
+  const f = sel ? sel.focus : null;
+  // サムネの選択状態
+  for (const btn of els.focusPicker.querySelectorAll('.bubble-thumb')) {
+    btn.classList.toggle('selected', (f ? f.src : '') === (btn.dataset.src || ''));
+  }
+  // スライダー値と enable/disable
+  const enabled = !!f;
+  els.focusScaleInput.disabled = !enabled;
+  els.focusRotationInput.disabled = !enabled;
+  els.focusResetBtn.disabled = !enabled;
+  const scale = f ? (f.scale || 1) : 1;
+  const rot = f ? (f.rotation || 0) : 0;
+  els.focusScaleInput.value = String(scale);
+  els.focusScaleValue.textContent = scale.toFixed(2);
+  els.focusRotationInput.value = String(rot);
+  els.focusRotationValue.textContent = String(Math.round(rot));
+}
+
+function updateFocusTransformOnly(panel) {
+  const el = els.panelContainer.querySelector(`[data-panel-id="${panel.id}"]`);
+  const img = el && el.querySelector('.panel-focus');
+  if (img) applyFocusTransform(img, panel, el);
+}
+
+initFocusPicker();
+
+els.focusScaleInput.addEventListener('input', () => {
+  const sel = getSelectedPanel();
+  if (!sel || !sel.focus) return;
+  const v = Math.max(FOCUS_SCALE_MIN, Math.min(FOCUS_SCALE_MAX, Number(els.focusScaleInput.value) || 1));
+  sel.focus.scale = v;
+  els.focusScaleValue.textContent = v.toFixed(2);
+  updateFocusTransformOnly(sel);
+});
+
+els.focusRotationInput.addEventListener('input', () => {
+  const sel = getSelectedPanel();
+  if (!sel || !sel.focus) return;
+  const v = Math.max(-180, Math.min(180, Number(els.focusRotationInput.value) || 0));
+  sel.focus.rotation = v;
+  els.focusRotationValue.textContent = String(Math.round(v));
+  updateFocusTransformOnly(sel);
+});
+
+els.focusResetBtn.addEventListener('click', () => {
+  const sel = getSelectedPanel();
+  if (!sel || !sel.focus) return;
+  sel.focus.scale = 1;
+  sel.focus.rotation = 0;
+  updateFocusControls();
+  updateFocusTransformOnly(sel);
+});
+
 // --- PNG 書き出し ---
 // canvasWidth × canvasHeight の白いページに、コマ・素材・テキストを合成して PNG 化する。
 
@@ -1979,9 +2163,12 @@ async function drawPanelsAndMaterials(ctx, page, pageW, pageH) {
   const gutterPx = gutterCss * scale;
   const borderPx = borderCss * scale;
 
-  // 素材画像を並列ロード
+  // 素材画像と集中線画像を並列ロード
   const materialImgs = await Promise.all(
     page.panels.map((p) => (p.material ? loadImageElement(p.material.src).catch(() => null) : null))
+  );
+  const focusImgs = await Promise.all(
+    page.panels.map((p) => (p.focus ? loadImageForCanvas(p.focus.src).catch(() => null) : null))
   );
 
   page.panels.forEach((p, i) => {
@@ -2001,6 +2188,28 @@ async function drawPanelsAndMaterials(ctx, page, pageW, pageH) {
         ctx.drawImage(materialImgs[i], -place.finalW / 2, -place.finalH / 2, place.finalW, place.finalH);
       }
       ctx.restore();
+    }
+
+    // 集中線描画(素材の上、レイヤーの下)。DOM の mix-blend-mode と同じ合成モードを使う。
+    // コマ枠でクリップ。
+    if (p.focus && focusImgs[i]) {
+      const fimg = focusImgs[i];
+      const nw = fimg.naturalWidth || 0;
+      const nh = fimg.naturalHeight || 0;
+      if (nw > 0 && nh > 0) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(rect.x, rect.y, rect.w, rect.h);
+        ctx.clip();
+        const coverScale = Math.max(rect.w / nw, rect.h / nh);
+        const finalW = nw * coverScale * (p.focus.scale || 1);
+        const finalH = nh * coverScale * (p.focus.scale || 1);
+        ctx.globalCompositeOperation = getFocusBlend(p.focus.src);
+        ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+        ctx.rotate(((p.focus.rotation || 0) * Math.PI) / 180);
+        ctx.drawImage(fimg, -finalW / 2, -finalH / 2, finalW, finalH);
+        ctx.restore();
+      }
     }
 
     // 枠線（CSS の border-box を再現: 矩形の内側に半幅オフセットで描く）
@@ -2460,7 +2669,7 @@ async function buildBundleBlob() {
       canvasWidth: page.canvasWidth,
       canvasHeight: page.canvasHeight,
       panels: page.panels.map((p) => {
-        const out = { id: p.id, x: p.x, y: p.y, w: p.w, h: p.h, material: null };
+        const out = { id: p.id, x: p.x, y: p.y, w: p.w, h: p.h, material: null, focus: null };
         if (p.material) {
           const blob = dataUrlToBlob(p.material.src);
           const ext = extFromMime(blob.type);
@@ -2472,6 +2681,14 @@ async function buildBundleBlob() {
             naturalHeight: p.material.naturalHeight,
             tx: p.material.tx, ty: p.material.ty,
             scale: p.material.scale, rotation: p.material.rotation,
+          };
+        }
+        if (p.focus) {
+          // 集中線は同梱アセット由来。src(アセットパス)・scale・rotation のみ保存する。
+          out.focus = {
+            src: p.focus.src,
+            scale: p.focus.scale,
+            rotation: p.focus.rotation,
           };
         }
         return out;
@@ -2568,7 +2785,7 @@ async function loadPageFromBundle(pageIndex, entries) {
       if (typeof data.canvasHeight === 'number') page.canvasHeight = data.canvasHeight;
       page.panels = [];
       for (const p of (data.panels || [])) {
-        const panel = { id: p.id, x: p.x, y: p.y, w: p.w, h: p.h, material: null };
+        const panel = { id: p.id, x: p.x, y: p.y, w: p.w, h: p.h, material: null, focus: null };
         if (p.material) {
           const matEntry = materialEntries[p.id];
           if (matEntry) {
@@ -2583,6 +2800,13 @@ async function loadPageFromBundle(pageIndex, entries) {
             };
           }
         }
+        if (p.focus && typeof p.focus.src === 'string' && FOCUS_CATALOG.some((c) => c.src === p.focus.src)) {
+          panel.focus = {
+            src: p.focus.src,
+            scale: typeof p.focus.scale === 'number' ? p.focus.scale : 1,
+            rotation: typeof p.focus.rotation === 'number' ? p.focus.rotation : 0,
+          };
+        }
         page.panels.push(panel);
       }
       // 旧 'none' で panels が空だったケースは 1コマ全面で埋める
@@ -2591,6 +2815,7 @@ async function loadPageFromBundle(pageIndex, entries) {
           id: page.nextPanelId++,
           x: p.x, y: p.y, w: p.w, h: p.h,
           material: null,
+          focus: null,
         }));
       }
       const ids = page.panels.map((p) => p.id);

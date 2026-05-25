@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Gina 20260525-04</title>
+  <title>Gina 20260525-05</title>
   <link rel="stylesheet" href="styles/style.css" />
 </head>
 <body>
@@ -83,6 +83,25 @@
         <div class="field-row">
           <button id="materialResetBtn" class="btn">位置をリセット</button>
           <button id="materialRemoveBtn" class="btn btn-danger">画像を外す</button>
+        </div>
+      </div>
+
+      <div class="inspector-section" id="panelFocusProps" hidden>
+        <h2>コマの効果</h2>
+        <div class="picker-tabs" role="tablist">
+          <button type="button" class="picker-tab selected" data-tab="focus" role="tab" aria-selected="true">集中線</button>
+        </div>
+        <div id="focusPicker" class="bubble-picker focus-picker"></div>
+        <label class="field">
+          <span>大きさ <small id="focusScaleValue">1.00</small>×</span>
+          <input type="range" id="focusScaleInput" min="0.5" max="3.0" step="0.05" value="1" disabled />
+        </label>
+        <label class="field">
+          <span>回転 <small id="focusRotationValue">0</small>°</span>
+          <input type="range" id="focusRotationInput" min="-180" max="180" step="1" value="0" disabled />
+        </label>
+        <div class="field-row">
+          <button id="focusResetBtn" class="btn" disabled>大きさ/回転をリセット</button>
         </div>
       </div>
 
