@@ -45,6 +45,9 @@ const els = {
   panelBorderValue: document.getElementById('panelBorderValue'),
   panelGutterInput: document.getElementById('panelGutterInput'),
   panelGutterValue: document.getElementById('panelGutterValue'),
+  canvasSizeFields: document.getElementById('canvasSizeFields'),
+  canvasWidthInput: document.getElementById('canvasWidthInput'),
+  canvasHeightInput: document.getElementById('canvasHeightInput'),
   splitTopBottomBtn: document.getElementById('splitTopBottomBtn'),
   splitLeftRightBtn: document.getElementById('splitLeftRightBtn'),
   deletePanelBtn: document.getElementById('deletePanelBtn'),
@@ -133,6 +136,8 @@ const TEMPLATES = {
 
 const DEFAULT_CANVAS_WIDTH = 1200;
 const DEFAULT_CANVAS_HEIGHT = 1700;
+const CANVAS_MIN_PX = 200;
+const CANVAS_MAX_PX = 4000;
 
 const OPPOSITE_EDGE = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' };
 const MIN_PANEL_DIM = 0.05; // コマがゼロサイズにならないよう正規化座標での最小寸法
@@ -298,6 +303,7 @@ function refreshPageView() {
   els.stage.style.height = `${cur.canvasHeight}px`;
   updateActionButtons();
   renderPanels();
+  updateCanvasSizeControls();
   if (els.templateSelect) els.templateSelect.value = cur.template;
   // 現在ページのレイヤー DOM を layerContainer に並べ直す。
   // 描画順(奥→手前): overlay → sticker → previewCanvas → text。
@@ -738,6 +744,7 @@ function deleteSelectedPanel() {
   cur.selectedPanelId = null;
   renderPanels();
   updateActionButtons();
+  updateCanvasSizeControls();
 }
 
 function splitSelectedPanel(direction) {
@@ -756,6 +763,7 @@ function splitSelectedPanel(direction) {
   cur.panels.splice(idx, 1, a, b);
   cur.selectedPanelId = a.id;
   renderPanels();
+  updateCanvasSizeControls();
 }
 
 function applyTemplate(templateId) {
@@ -819,6 +827,55 @@ els.panelBorderInput.addEventListener('input', () => {
 els.panelGutterInput.addEventListener('input', () => {
   applyPanelGutter(Number(els.panelGutterInput.value));
 });
+
+// 1コマしかないページではアスペクト比を自由に変更できる UI を出す。
+// 2コマ以上に分割された後は、コマが正規化座標で残っているのでサイズは保持したまま UI だけ畳む。
+function updateCanvasSizeControls() {
+  const singlePanel = cur.panels.length === 1;
+  els.canvasSizeFields.hidden = !singlePanel;
+  els.canvasWidthInput.value = String(cur.canvasWidth);
+  els.canvasHeightInput.value = String(cur.canvasHeight);
+}
+
+function applyCanvasSize(w, h) {
+  cur.canvasWidth = w;
+  cur.canvasHeight = h;
+  els.stage.style.width = `${w}px`;
+  els.stage.style.height = `${h}px`;
+  // 素材・集中線・吹き出し・テキストは表示幅依存なので再適用が必要
+  for (const p of cur.panels) {
+    const el = els.panelContainer.querySelector(`[data-panel-id="${p.id}"]`);
+    if (!el) continue;
+    const img = el.querySelector('.panel-material');
+    if (img) applyMaterialTransform(img, p, el);
+    const fimg = el.querySelector('.panel-focus');
+    if (fimg) applyFocusTransform(fimg, p, el);
+  }
+  applyAllLayerStyles();
+}
+
+function onCanvasSizeInput() {
+  const raw = (input, fallback) => {
+    const n = Math.round(Number(input.value));
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(CANVAS_MIN_PX, Math.min(CANVAS_MAX_PX, n));
+  };
+  const w = raw(els.canvasWidthInput, cur.canvasWidth);
+  const h = raw(els.canvasHeightInput, cur.canvasHeight);
+  applyCanvasSize(w, h);
+}
+
+function onCanvasSizeChange() {
+  // 入力確定時にクランプ結果を入力欄へ反映
+  onCanvasSizeInput();
+  els.canvasWidthInput.value = String(cur.canvasWidth);
+  els.canvasHeightInput.value = String(cur.canvasHeight);
+}
+
+els.canvasWidthInput.addEventListener('input', onCanvasSizeInput);
+els.canvasHeightInput.addEventListener('input', onCanvasSizeInput);
+els.canvasWidthInput.addEventListener('change', onCanvasSizeChange);
+els.canvasHeightInput.addEventListener('change', onCanvasSizeChange);
 
 els.splitTopBottomBtn.addEventListener('click', () => splitSelectedPanel('topBottom'));
 els.splitLeftRightBtn.addEventListener('click', () => splitSelectedPanel('leftRight'));

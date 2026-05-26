@@ -448,7 +448,8 @@ header h1 {
 
 .field textarea,
 .field select,
-.field input[type="text"] {
+.field input[type="text"],
+.field input[type="number"] {
   width: 100%;
   padding: 6px 8px;
   border: 1px solid #ccc;
@@ -473,6 +474,11 @@ header h1 {
 
 .field-row .btn {
   flex: 1;
+}
+
+.field-row .field {
+  flex: 1;
+  margin-bottom: 0;
 }
 
 .memo-panel {

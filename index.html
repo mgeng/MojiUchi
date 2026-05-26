@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Gina 20260525-07</title>
+  <title>Gina 20260526-01</title>
   <link rel="stylesheet" href="styles/style.css" />
 </head>
 <body>
@@ -66,6 +66,20 @@
           <span>コマ間の間隔 <small id="panelGutterValue">14</small>px</span>
           <input type="range" id="panelGutterInput" min="0" max="40" step="1" value="14" />
         </label>
+
+        <div id="canvasSizeFields" hidden>
+          <div class="field-row">
+            <label class="field">
+              <span>ページ幅 (px)</span>
+              <input type="number" id="canvasWidthInput" min="200" max="4000" step="10" value="1200" />
+            </label>
+            <label class="field">
+              <span>ページ高さ (px)</span>
+              <input type="number" id="canvasHeightInput" min="200" max="4000" step="10" value="1700" />
+            </label>
+          </div>
+          <p class="hint">1コマのときだけページのアスペクト比を変更できます。</p>
+        </div>
 
         <div class="field-row">
           <button id="splitTopBottomBtn" class="btn" disabled title="選択中のコマを上下に分割">上下に分割</button>
