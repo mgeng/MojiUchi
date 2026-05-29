@@ -72,7 +72,6 @@ const els = {
   propDelete: document.getElementById('propDelete'),
   stickerProps: document.getElementById('stickerProps'),
   stickerTitle: document.getElementById('stickerTitle'),
-  stickerHint: document.getElementById('stickerHint'),
   stickerDelete: document.getElementById('stickerDelete'),
   stickerFlipH: document.getElementById('stickerFlipH'),
   stickerFlipV: document.getElementById('stickerFlipV'),
@@ -86,6 +85,11 @@ const els = {
   memoTitle: document.getElementById('memoTitle'),
   memoClose: document.getElementById('memoClose'),
   memoText: document.getElementById('memoText'),
+  helpToggle: document.getElementById('helpToggle'),
+  helpPanel: document.getElementById('helpPanel'),
+  helpClose: document.getElementById('helpClose'),
+  shortcutsPanel: document.getElementById('shortcutsPanel'),
+  shortcutsClose: document.getElementById('shortcutsClose'),
   saveProjectBtn: document.getElementById('saveProjectBtn'),
   prevPageBtn: document.getElementById('prevPageBtn'),
   nextPageBtn: document.getElementById('nextPageBtn'),
@@ -93,6 +97,14 @@ const els = {
   deletePageBtn: document.getElementById('deletePageBtn'),
   contextMenu: document.getElementById('contextMenu'),
 };
+
+function toggleHelpPanel() {
+  els.helpPanel.hidden = !els.helpPanel.hidden;
+}
+
+function toggleShortcutsPanel() {
+  els.shortcutsPanel.hidden = !els.shortcutsPanel.hidden;
+}
 
 // コマ割りテンプレート。panels は 0-1 の正規化座標（{x,y,w,h}）。
 // 初期状態は 'one'（1コマ全面）。「テンプレなし」は廃止。
@@ -1361,6 +1373,10 @@ document.addEventListener('mousedown', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !els.contextMenu.hidden) {
     hideContextMenu();
+  } else if (e.key === 'Escape' && !els.helpPanel.hidden) {
+    els.helpPanel.hidden = true;
+  } else if (e.key === 'Escape' && !els.shortcutsPanel.hidden) {
+    els.shortcutsPanel.hidden = true;
   }
 });
 
@@ -1371,6 +1387,16 @@ document.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   if (e.altKey) return;
   const key = e.key.toLowerCase();
+  if (key === 'h' && !e.shiftKey) {
+    e.preventDefault();
+    toggleHelpPanel();
+    return;
+  }
+  if ((key === '/' || e.code === 'Slash') && !e.shiftKey) {
+    e.preventDefault();
+    toggleShortcutsPanel();
+    return;
+  }
   if (key === 'z' && !e.shiftKey && !isEditableTarget()) {
     if (undoLastChange()) e.preventDefault();
     return;
@@ -2297,9 +2323,6 @@ function updateInspector() {
     els.stickerTitle.textContent = isPanelOverlay
       ? '選択中のコマ重ね画像'
       : (isOverlay ? '選択中の上重ね画像' : '選択中の吹き出し');
-    els.stickerHint.textContent = isOverlay
-      ? 'ドラッグで移動 / 四隅でリサイズ(アスペクト比固定) / ホイールで拡縮'
-      : 'ドラッグで移動 / 四隅でリサイズ / ホイールで拡縮';
     els.bubblePickerField.hidden = isOverlay;
     els.stickerDelete.textContent = isPanelOverlay
       ? 'このコマ重ね画像を削除'
@@ -3456,6 +3479,15 @@ els.memoToggle.addEventListener('click', () => {
 });
 els.memoClose.addEventListener('click', () => {
   els.memoPanel.hidden = true;
+});
+els.helpToggle.addEventListener('click', () => {
+  toggleHelpPanel();
+});
+els.helpClose.addEventListener('click', () => {
+  els.helpPanel.hidden = true;
+});
+els.shortcutsClose.addEventListener('click', () => {
+  els.shortcutsPanel.hidden = true;
 });
 
 // textarea への入力を現在ページのメモに反映

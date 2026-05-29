@@ -21,6 +21,7 @@
       <button id="saveProjectBtn" class="btn" disabled title="上書き保存（Ctrl+S）">保存</button>
       <button id="exportBtn" class="btn" disabled>PNG書き出し</button>
       <button id="memoToggle" class="btn">メモ</button>
+      <button id="helpToggle" class="btn" type="button" title="ヘルプ（Ctrl+H）">Help</button>
     </div>
   </header>
 
@@ -32,6 +33,130 @@
       </div>
     </div>
     <textarea id="memoText" class="memo-body" placeholder="セリフ案などを置いておく場所"></textarea>
+  </div>
+
+  <div id="helpPanel" class="help-panel" role="dialog" aria-modal="true" aria-labelledby="helpTitle" hidden>
+    <div class="help-header">
+      <span id="helpTitle" class="help-title">Help</span>
+      <button id="helpClose" class="memo-close" aria-label="閉じる" title="閉じる">×</button>
+    </div>
+    <div class="help-body">
+      <section class="help-section">
+        <h3>基本操作</h3>
+        <ul class="help-list">
+          <li><span>ページ上で右クリック</span><strong>テキスト・フキダシ・画像を追加</strong></li>
+          <li><span>コマに画像をドロップ</span><strong>素材を配置</strong></li>
+          <li><span>コマをダブルクリック</span><strong>素材を選んで配置</strong></li>
+        </ul>
+      </section>
+
+      <section class="help-section">
+        <h3>ファイル・メモ</h3>
+        <ul class="help-list">
+          <li><span>開く</span><strong>.mj プロジェクトや .txt メモを読み込みます</strong></li>
+          <li><span>保存</span><strong>現在のプロジェクトを .mj として保存します</strong></li>
+          <li><span>PNG書き出し</span><strong>現在ページを画像として書き出します</strong></li>
+          <li><span>メモ</span><strong>ページごとのメモ欄を開閉します</strong></li>
+        </ul>
+      </section>
+
+      <section class="help-section">
+        <h3>右クリックメニュー</h3>
+        <ul class="help-list">
+          <li><span>テキストを追加</span><strong>ページ上に文字を置きます</strong></li>
+          <li><span>モノローグ</span><strong>枠付きのナレーション用テキストを置きます</strong></li>
+          <li><span>フキダシ</span><strong>吹き出し素材を追加します</strong></li>
+          <li><span>画像を上から追加</span><strong>ページ全体の上に重ねる画像を追加します</strong></li>
+          <li><span>画像をコマに重ねて追加</span><strong>選択したコマ内に収まる画像を追加します</strong></li>
+        </ul>
+      </section>
+
+      <section class="help-section">
+        <h3>ページ・コマ編集</h3>
+        <ul class="help-list">
+          <li><span>ページサイズ</span><strong>1コマ（全面）のときだけ幅と高さを変更できます</strong></li>
+          <li><span>コマをクリック</span><strong>選択して分割・削除の対象にします</strong></li>
+          <li><span>分割ボタン</span><strong>選択中のコマを上下または左右に分割します</strong></li>
+          <li><span>コマ削除</span><strong>隣接コマが空いた領域を埋めます</strong></li>
+        </ul>
+      </section>
+
+      <section class="help-section">
+        <h3>素材・画像</h3>
+        <ul class="help-list">
+          <li><span>ドラッグ</span><strong>配置した素材や画像を移動します</strong></li>
+          <li><span>ホイール</span><strong>素材や吹き出しを拡縮します</strong></li>
+          <li><span>Shift + ホイール</span><strong>コマ内の素材を回転します</strong></li>
+          <li><span>四隅のハンドル</span><strong>上重ね画像や吹き出しをリサイズします</strong></li>
+          <li><span>画像を外す</span><strong>選択中のコマから素材を取り除きます</strong></li>
+        </ul>
+      </section>
+
+      <section class="help-section">
+        <h3>コマの効果</h3>
+        <ul class="help-list">
+          <li><span>集中線</span><strong>選択中のコマに効果線を重ねます</strong></li>
+          <li><span>大きさ</span><strong>集中線の表示スケールを調整します</strong></li>
+          <li><span>回転</span><strong>集中線の向きを調整します</strong></li>
+          <li><span>リセット</span><strong>大きさと回転を初期状態に戻します</strong></li>
+        </ul>
+      </section>
+
+      <section class="help-section">
+        <h3>テキスト・吹き出し</h3>
+        <ul class="help-list">
+          <li><span>テキストをドラッグ</span><strong>位置を移動します</strong></li>
+          <li><span>テキストをダブルクリック</span><strong>本文を直接編集します</strong></li>
+          <li><span>形状</span><strong>選択中の吹き出しの形を変更します</strong></li>
+          <li><span>左右/上下反転</span><strong>選択中の吹き出し画像を反転します</strong></li>
+        </ul>
+      </section>
+
+      <section class="help-section">
+        <h3>ショートカット一覧</h3>
+        <p class="help-note">ショートカットキーは <kbd>Ctrl</kbd><kbd>/</kbd> で表示できます。</p>
+      </section>
+    </div>
+  </div>
+
+  <div id="shortcutsPanel" class="help-panel shortcuts-panel" role="dialog" aria-modal="true" aria-labelledby="shortcutsTitle" hidden>
+    <div class="help-header">
+      <span id="shortcutsTitle" class="help-title">Shortcuts</span>
+      <button id="shortcutsClose" class="memo-close" aria-label="閉じる" title="閉じる">×</button>
+    </div>
+    <div class="help-body">
+      <section class="help-section">
+        <h3>ファイル・表示</h3>
+        <div class="shortcut-grid">
+          <div><kbd>Ctrl</kbd><kbd>O</kbd><span>開く</span></div>
+          <div><kbd>Ctrl</kbd><kbd>S</kbd><span>上書き保存</span></div>
+          <div><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>S</kbd><span>名前を付けて保存</span></div>
+          <div><kbd>Ctrl</kbd><kbd>E</kbd><span>PNG書き出し</span></div>
+          <div><kbd>Ctrl</kbd><kbd>H</kbd><span>Help</span></div>
+          <div><kbd>Ctrl</kbd><kbd>/</kbd><span>Shortcuts</span></div>
+        </div>
+      </section>
+
+      <section class="help-section">
+        <h3>ページ・選択</h3>
+        <div class="shortcut-grid">
+          <div><kbd>Ctrl</kbd><kbd>←</kbd><kbd>→</kbd><span>ページ移動</span></div>
+          <div><kbd>Delete</kbd><span>選択中のコマを削除</span></div>
+          <div><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd><span>選択中レイヤーを1px移動</span></div>
+          <div><kbd>Ctrl</kbd><kbd>↑</kbd><kbd>↓</kbd><span>選択中テキストの文字サイズ変更</span></div>
+        </div>
+      </section>
+
+      <section class="help-section">
+        <h3>編集</h3>
+        <div class="shortcut-grid">
+          <div><kbd>Ctrl</kbd><kbd>Z</kbd><span>元に戻す</span></div>
+          <div><kbd>Ctrl</kbd><kbd>C</kbd><span>コピー</span></div>
+          <div><kbd>Ctrl</kbd><kbd>V</kbd><span>貼り付け</span></div>
+          <div><kbd>Esc</kbd><span>ダイアログを閉じる</span></div>
+        </div>
+      </section>
+    </div>
   </div>
 
   <main id="app">
@@ -78,7 +203,6 @@
               <input type="number" id="canvasHeightInput" min="200" max="4000" step="10" value="1700" />
             </label>
           </div>
-          <p class="hint">1コマのときだけページのアスペクト比を変更できます。</p>
         </div>
 
         <div class="field-row">
@@ -88,12 +212,10 @@
         <div class="field-row">
           <button id="deletePanelBtn" class="btn btn-danger" disabled title="選択中のコマを削除（隣接コマが空きを埋めます）">コマを削除</button>
         </div>
-        <p class="hint">コマをクリックで選択 → 分割/削除ボタン。Delete キーでも削除できます。</p>
       </div>
 
       <div class="inspector-section" id="panelMaterialProps" hidden>
         <h2>素材の操作</h2>
-        <p class="hint">ドラッグで移動 / ホイールで拡縮 / Shift+ホイールで回転</p>
         <div class="field-row">
           <button id="materialResetBtn" class="btn">位置をリセット</button>
           <button id="materialRemoveBtn" class="btn btn-danger">画像を外す</button>
@@ -119,16 +241,8 @@
         </div>
       </div>
 
-      <div class="inspector-section">
-        <h2>操作</h2>
-        <p class="hint">ページ上で右クリック → 「テキストを追加」で文字を追加。コマに画像をドロップ / ダブルクリックで素材を配置。</p>
-        <p class="hint">ショートカット: Ctrl+O 開く / Ctrl+S 上書き保存 / Ctrl+Shift+S 名前を付けて保存 / Ctrl+E PNG書き出し / Ctrl+←→ ページ移動</p>
-        <p class="hint">選択中: 矢印キーで1px移動 / Ctrl+↑↓ で文字サイズ変更 / Ctrl+C コピー Ctrl+V 貼り付け</p>
-      </div>
-
       <div class="inspector-section" id="stickerProps" hidden>
         <h2 id="stickerTitle">選択中の吹き出し</h2>
-        <p class="hint" id="stickerHint">ドラッグで移動 / ホイールで拡縮</p>
         <div class="field" id="bubblePickerField">
           <span>形状</span>
           <div id="bubblePicker" class="bubble-picker"></div>
@@ -177,7 +291,6 @@
           <button id="propDelete" class="btn btn-danger">このテキストを削除</button>
         </div>
 
-        <p class="hint">ドラッグで位置移動、ダブルクリックで本文を直接編集。</p>
       </div>
     </aside>
   </main>
