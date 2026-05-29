@@ -96,7 +96,44 @@ const els = {
   pageIndicator: document.getElementById('pageIndicator'),
   deletePageBtn: document.getElementById('deletePageBtn'),
   contextMenu: document.getElementById('contextMenu'),
+  themeToggle: document.getElementById('themeToggle'),
 };
+
+const THEME_STORAGE_KEY = 'gina-theme';
+
+function getStoredTheme() {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function storeTheme(theme) {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {
+    // Storage can be unavailable in some local-file or privacy modes.
+  }
+}
+
+function setTheme(theme) {
+  const isDark = theme === 'dark';
+  document.body.classList.toggle('theme-dark', isDark);
+  if (els.themeToggle) {
+    els.themeToggle.classList.toggle('active', isDark);
+    els.themeToggle.setAttribute('aria-pressed', String(isDark));
+    els.themeToggle.textContent = isDark ? 'Light' : 'Dark';
+  }
+}
+
+function initTheme() {
+  const saved = getStoredTheme();
+  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  setTheme(saved || (prefersDark ? 'dark' : 'light'));
+}
+
+initTheme();
 
 function toggleHelpPanel() {
   els.helpPanel.hidden = !els.helpPanel.hidden;
@@ -3483,6 +3520,13 @@ els.memoClose.addEventListener('click', () => {
 els.helpToggle.addEventListener('click', () => {
   toggleHelpPanel();
 });
+if (els.themeToggle) {
+  els.themeToggle.addEventListener('click', () => {
+    const nextTheme = document.body.classList.contains('theme-dark') ? 'light' : 'dark';
+    storeTheme(nextTheme);
+    setTheme(nextTheme);
+  });
+}
 els.helpClose.addEventListener('click', () => {
   els.helpPanel.hidden = true;
 });
