@@ -97,9 +97,14 @@ const els = {
   deletePageBtn: document.getElementById('deletePageBtn'),
   contextMenu: document.getElementById('contextMenu'),
   themeToggle: document.getElementById('themeToggle'),
+  inspectorResizeHandle: document.getElementById('inspectorResizeHandle'),
 };
 
 const THEME_STORAGE_KEY = 'gina-theme';
+const INSPECTOR_WIDTH_STORAGE_KEY = 'gina-inspector-width';
+const INSPECTOR_MIN_WIDTH = 240;
+const INSPECTOR_MAX_WIDTH = 640;
+const STAGE_MIN_WIDTH = 360;
 
 function getStoredTheme() {
   try {
@@ -134,6 +139,79 @@ function initTheme() {
 }
 
 initTheme();
+
+function getInspectorMaxWidth() {
+  return Math.max(
+    INSPECTOR_MIN_WIDTH,
+    Math.min(INSPECTOR_MAX_WIDTH, window.innerWidth - STAGE_MIN_WIDTH)
+  );
+}
+
+function clampInspectorWidth(width) {
+  return Math.min(Math.max(width, INSPECTOR_MIN_WIDTH), getInspectorMaxWidth());
+}
+
+function storeInspectorWidth(width) {
+  try {
+    localStorage.setItem(INSPECTOR_WIDTH_STORAGE_KEY, String(Math.round(width)));
+  } catch {
+    // Storage can be unavailable in some local-file or privacy modes.
+  }
+}
+
+function applyInspectorWidth(width, { persist = false, refresh = true } = {}) {
+  const nextWidth = clampInspectorWidth(width);
+  document.documentElement.style.setProperty('--inspector-width', `${nextWidth}px`);
+  if (persist) storeInspectorWidth(nextWidth);
+  if (refresh) refreshStageResponsiveLayout();
+  return nextWidth;
+}
+
+function getStoredInspectorWidth() {
+  try {
+    const value = Number(localStorage.getItem(INSPECTOR_WIDTH_STORAGE_KEY));
+    return Number.isFinite(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function initInspectorResize() {
+  applyInspectorWidth(getStoredInspectorWidth() || 320, { refresh: false });
+  if (!els.inspectorResizeHandle) return;
+
+  let startX = 0;
+  let startWidth = 0;
+
+  els.inspectorResizeHandle.addEventListener('pointerdown', (e) => {
+    if (e.button != null && e.button !== 0) return;
+    e.preventDefault();
+    startX = e.clientX;
+    startWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--inspector-width')) || 320;
+    els.inspectorResizeHandle.classList.add('dragging');
+    els.inspectorResizeHandle.setPointerCapture(e.pointerId);
+  });
+
+  els.inspectorResizeHandle.addEventListener('pointermove', (e) => {
+    if (!els.inspectorResizeHandle.classList.contains('dragging')) return;
+    applyInspectorWidth(startWidth - (e.clientX - startX));
+  });
+
+  const finishDrag = (e) => {
+    if (!els.inspectorResizeHandle.classList.contains('dragging')) return;
+    els.inspectorResizeHandle.classList.remove('dragging');
+    if (els.inspectorResizeHandle.hasPointerCapture(e.pointerId)) {
+      els.inspectorResizeHandle.releasePointerCapture(e.pointerId);
+    }
+    const width = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--inspector-width')) || 320;
+    storeInspectorWidth(width);
+  };
+
+  els.inspectorResizeHandle.addEventListener('pointerup', finishDrag);
+  els.inspectorResizeHandle.addEventListener('pointercancel', finishDrag);
+}
+
+initInspectorResize();
 
 function toggleHelpPanel() {
   els.helpPanel.hidden = !els.helpPanel.hidden;

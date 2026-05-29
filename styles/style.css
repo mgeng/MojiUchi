@@ -28,6 +28,8 @@
   --danger-hover: #b22;
   --shadow: rgba(0, 0, 0, 0.2);
   --shadow-strong: rgba(0, 0, 0, 0.4);
+  --inspector-width: 320px;
+  --inspector-resizer-width: 8px;
 }
 
 body.theme-dark {
@@ -164,7 +166,7 @@ header h1 {
 #app {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: 1fr 320px;
+  grid-template-columns: minmax(0, 1fr) var(--inspector-resizer-width) var(--inspector-width);
   min-height: 0;
 }
 
@@ -470,9 +472,36 @@ header h1 {
 
 .inspector {
   background: #fff;
-  border-left: 1px solid #ddd;
   padding: 16px;
   overflow-y: auto;
+  min-width: 0;
+}
+
+.inspector-resize-handle {
+  position: relative;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.inspector-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 40px;
+  border-left: 1px solid var(--input-border);
+  border-right: 1px solid var(--input-border);
+  transform: translate(-50%, -50%);
+  opacity: 0.8;
+}
+
+.inspector-resize-handle:hover,
+.inspector-resize-handle.dragging {
+  background: var(--accent-soft);
 }
 
 .inspector h2 {
