@@ -351,6 +351,29 @@ function openFile(file) {
   }
 }
 
+function sortFilesByName(files) {
+  return [...files].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ja', {
+    numeric: true,
+    sensitivity: 'base',
+  }));
+}
+
+function openFiles(files) {
+  const list = Array.from(files || []).filter(Boolean);
+  if (list.length === 0) return;
+  if (list.length === 1) {
+    openFile(list[0]);
+    return;
+  }
+
+  const memoFiles = list.filter((file) => detectFileKind(file) === 'memo');
+  if (memoFiles.length !== list.length) {
+    alert('複数読み込みできるのは .txt ファイルのみです。');
+    return;
+  }
+  loadMemoFiles(sortFilesByName(memoFiles));
+}
+
 const MAX_PAGES = 16;
 
 function createEmptyPage() {
@@ -534,8 +557,12 @@ function undoLastChange() {
 
 // 何か書き出す/保存する価値があるかどうか。コマ割りは常に存在する前提なので、
 // 「素材かテキストが何か置かれているか」で判定する。
-function hasPageContent(page) {
+function hasPageVisualContent(page) {
   return page.panels.some((p) => p.material || p.focus) || page.layers.length > 0;
+}
+
+function hasPageContent(page) {
+  return hasPageVisualContent(page) || (page.memo || '').trim().length > 0;
 }
 
 function isPageEmpty(page) {
@@ -557,10 +584,9 @@ function syncMemoFromPage() {
 // 中身（素材かテキスト）の有無で開閉する各種ボタンの enable 状態を一括更新。
 // 素材セット/外し、テキスト追加/削除など hasPageContent に影響する操作の後に呼ぶ。
 function updateActionButtons() {
-  const hasContent = hasPageContent(cur);
-  els.exportBtn.disabled = !hasContent;
+  els.exportBtn.disabled = !hasPageVisualContent(cur);
   els.saveProjectBtn.disabled = !anyPageHasContent();
-  els.deletePageBtn.disabled = !hasContent;
+  els.deletePageBtn.disabled = !hasPageContent(cur);
 }
 
 // 表示中ページのレイヤー・有効状態をいまの cur に同期する。
@@ -1233,8 +1259,7 @@ refreshPageView();
 // --- 画像読み込み ---
 
 els.fileInput.addEventListener('change', (e) => {
-  const file = e.target.files && e.target.files[0];
-  if (file) openFile(file);
+  openFiles(e.target.files);
   els.fileInput.value = '';
 });
 
@@ -1244,7 +1269,7 @@ async function openProject() {
   if (window.showOpenFilePicker) {
     let handle;
     try {
-      [handle] = await window.showOpenFilePicker({
+      const handles = await window.showOpenFilePicker({
         types: [
           {
             description: 'Gina プロジェクト / メモ',
@@ -1254,8 +1279,15 @@ async function openProject() {
             },
           },
         ],
-        multiple: false,
+        multiple: true,
       });
+      if (handles.length === 1) {
+        [handle] = handles;
+      } else {
+        const files = await Promise.all(handles.map((h) => h.getFile()));
+        openFiles(files);
+        return;
+      }
     } catch (err) {
       if (err && err.name === 'AbortError') return; // ユーザーキャンセル
       console.warn('showOpenFilePicker が使えなかったので <input type=file> に切り替えます:', err);
@@ -1287,8 +1319,13 @@ els.stageWrapper.addEventListener('dragleave', () => {
 els.stageWrapper.addEventListener('drop', (e) => {
   e.preventDefault();
   els.stageWrapper.classList.remove('dragover');
-  const file = e.dataTransfer.files && e.dataTransfer.files[0];
+  const files = Array.from(e.dataTransfer.files || []);
+  const file = files[0];
   if (!file) return;
+  if (files.length > 1) {
+    openFiles(files);
+    return;
+  }
   // 画像ドロップは常に「上重ね画像」として追加。
   // コマへの素材セットはコマのダブルクリックから行う。
   if (detectFileKind(file) === 'image') {
@@ -3616,6 +3653,7 @@ els.shortcutsClose.addEventListener('click', () => {
 els.memoText.addEventListener('input', () => {
   recordUndo();
   cur.memo = els.memoText.value;
+  updateActionButtons();
 });
 
 function loadMemoFile(file) {
@@ -3634,8 +3672,48 @@ function loadMemoFile(file) {
     cur.memo = text;
     els.memoText.value = text;
     els.memoPanel.hidden = false;
+    updateActionButtons();
   };
   reader.readAsArrayBuffer(file);
+}
+
+async function readMemoTextFile(file) {
+  const buf = await file.arrayBuffer();
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
+  } catch {
+    return new TextDecoder('shift_jis').decode(buf);
+  }
+}
+
+async function loadMemoFiles(files) {
+  const start = state.currentPageIndex;
+  if (start + files.length > MAX_PAGES) {
+    alert(`選択した .txt は ${files.length} 個あります。P${start + 1} から読み込むと ${MAX_PAGES}P を超えるため、読み込みを中止しました。`);
+    return;
+  }
+
+  const overwritePages = files
+    .map((_, i) => start + i)
+    .filter((pageIndex) => (state.pages[pageIndex].memo || '').trim().length > 0);
+  if (overwritePages.length > 0) {
+    const labels = overwritePages.map((pageIndex) => `P${pageIndex + 1}`).join(', ');
+    if (!confirm(`${labels} の現在のメモを上書きします。よろしいですか?`)) return;
+  }
+
+  try {
+    const texts = await Promise.all(files.map(readMemoTextFile));
+    recordUndo();
+    texts.forEach((text, i) => {
+      state.pages[start + i].memo = text;
+    });
+    syncMemoFromPage();
+    els.memoPanel.hidden = false;
+    updateActionButtons();
+  } catch (err) {
+    console.error(err);
+    alert('テキストの読み込みに失敗しました: ' + (err && err.message ? err.message : err));
+  }
 }
 
 els.memoHeader.addEventListener('mousedown', (e) => {
@@ -3666,7 +3744,7 @@ els.memoHeader.addEventListener('mousedown', (e) => {
 });
 
 els.exportBtn.addEventListener('click', async () => {
-  if (!hasPageContent(cur)) return;
+  if (!hasPageVisualContent(cur)) return;
   els.exportBtn.disabled = true;
   try {
     await ensureExportFontsReady();
@@ -3744,6 +3822,6 @@ els.exportBtn.addEventListener('click', async () => {
     console.error(err);
     alert('PNG 書き出しに失敗しました: ' + (err && err.message ? err.message : err));
   } finally {
-    els.exportBtn.disabled = !hasPageContent(cur);
+    els.exportBtn.disabled = !hasPageVisualContent(cur);
   }
 });
