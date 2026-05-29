@@ -265,6 +265,146 @@ function updateDocumentTitle() {
 
 let cur = state.pages[0];
 
+const UNDO_LIMIT = 5;
+const undoStack = [];
+let isRestoringUndo = false;
+
+function clonePlain(value) {
+  return value == null ? null : JSON.parse(JSON.stringify(value));
+}
+
+function snapshotLayer(layer) {
+  const base = {
+    id: layer.id,
+    kind: layer.kind || 'text',
+    x: layer.x,
+    y: layer.y,
+  };
+  if (isStickerLike(layer)) {
+    return {
+      ...base,
+      panelId: layer.panelId,
+      src: layer.src,
+      width: layer.width,
+      height: layer.height,
+      naturalWidth: layer.naturalWidth || 0,
+      naturalHeight: layer.naturalHeight || 0,
+      flipH: !!layer.flipH,
+      flipV: !!layer.flipV,
+    };
+  }
+  return {
+    ...base,
+    text: layer.text,
+    font: layer.font,
+    size: layer.size,
+    orientation: layer.orientation,
+    lineHeight: layer.lineHeight,
+  };
+}
+
+function snapshotPage(page = cur) {
+  return {
+    currentPageIndex: state.currentPageIndex,
+    page: {
+      layers: page.layers.map(snapshotLayer),
+      selectedId: page.selectedId,
+      nextId: page.nextId,
+      memo: page.memo,
+      template: page.template,
+      panels: page.panels.map((p) => ({
+        id: p.id,
+        x: p.x,
+        y: p.y,
+        w: p.w,
+        h: p.h,
+        material: clonePlain(p.material),
+        focus: clonePlain(p.focus),
+      })),
+      nextPanelId: page.nextPanelId,
+      selectedPanelId: page.selectedPanelId,
+      canvasWidth: page.canvasWidth,
+      canvasHeight: page.canvasHeight,
+    },
+  };
+}
+
+function recordUndo() {
+  if (isRestoringUndo) return;
+  const snapshot = snapshotPage();
+  const serialized = JSON.stringify(snapshot);
+  const last = undoStack[undoStack.length - 1];
+  if (last && last.serialized === serialized) return;
+  undoStack.push({ snapshot, serialized });
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+}
+
+function restoreCurrentPageSnapshot(snapshot) {
+  const data = snapshot.page;
+  for (const l of cur.layers) {
+    if (isStickerLike(l)) removeStickerHandles(l);
+    if (l.el) l.el.remove();
+  }
+  cur.layers = [];
+  cur.selectedId = null;
+  cur.nextId = 1;
+  cur.memo = data.memo || '';
+  cur.template = data.template || DEFAULT_TEMPLATE;
+  cur.panels = (data.panels || []).map((p) => ({
+    id: p.id,
+    x: p.x,
+    y: p.y,
+    w: p.w,
+    h: p.h,
+    material: clonePlain(p.material),
+    focus: clonePlain(p.focus),
+  }));
+  cur.nextPanelId = data.nextPanelId || 1;
+  cur.selectedPanelId = data.selectedPanelId ?? null;
+  cur.canvasWidth = data.canvasWidth || DEFAULT_CANVAS_WIDTH;
+  cur.canvasHeight = data.canvasHeight || DEFAULT_CANVAS_HEIGHT;
+
+  for (const layer of data.layers || []) {
+    if (layer.kind === 'sticker') {
+      addStickerLayer(layer);
+    } else if (layer.kind === 'overlay') {
+      addOverlayLayer(layer);
+    } else if (layer.kind === 'panelOverlay') {
+      addPanelOverlayLayer(layer);
+    } else {
+      addTextLayer(layer);
+    }
+  }
+  cur.nextId = data.nextId || cur.nextId;
+  cur.selectedId = data.selectedId ?? null;
+  cur.selectedPanelId = data.selectedPanelId ?? null;
+  refreshPageView();
+  updatePageIndicator();
+  syncMemoFromPage();
+  if (cur.selectedId != null) {
+    selectLayer(cur.selectedId);
+  } else if (cur.selectedPanelId != null) {
+    selectPanel(cur.selectedPanelId);
+  } else {
+    updateInspector();
+  }
+}
+
+function undoLastChange() {
+  const entry = undoStack.pop();
+  if (!entry) return false;
+  isRestoringUndo = true;
+  try {
+    if (entry.snapshot.currentPageIndex !== state.currentPageIndex) {
+      switchToPage(entry.snapshot.currentPageIndex);
+    }
+    restoreCurrentPageSnapshot(entry.snapshot);
+  } finally {
+    isRestoringUndo = false;
+  }
+  return true;
+}
+
 // 何か書き出す/保存する価値があるかどうか。コマ割りは常に存在する前提なので、
 // 「素材かテキストが何か置かれているか」で判定する。
 function hasPageContent(page) {
@@ -427,6 +567,7 @@ function startEdgeDrag(panel, edge, startEvent) {
   startEvent.stopPropagation();
   const aligned = findAlignedNeighbors(panel, edge);
   if (aligned === null) return;
+  recordUndo();
   const rect = els.panelContainer.getBoundingClientRect();
   const isHorizontal = edge === 'left' || edge === 'right';
   const startClient = isHorizontal ? startEvent.clientX : startEvent.clientY;
@@ -577,6 +718,7 @@ function openImagePickerForPanel(panel) {
 async function loadImageAsPanelMaterial(panel, blob) {
   const dataUrl = await blobToDataUrl(blob);
   const sz = await getImageNaturalSize(dataUrl);
+  recordUndo();
   panel.material = {
     src: dataUrl,
     naturalWidth: sz.width,
@@ -595,6 +737,7 @@ async function loadImageAsPanelMaterial(panel, blob) {
 function startMaterialDrag(panel, panelEl, startEvent) {
   startEvent.preventDefault();
   startEvent.stopPropagation();
+  recordUndo();
   const startX = startEvent.clientX;
   const startY = startEvent.clientY;
   const pw = panelEl.clientWidth;
@@ -659,6 +802,7 @@ function renderPanels() {
       if (p.id !== cur.selectedPanelId) return;
       if (!p.material) return;
       e.preventDefault();
+      recordUndo();
       const img = el.querySelector('.panel-material');
       if (e.shiftKey) {
         const step = e.deltaY < 0 ? -5 : 5;
@@ -742,6 +886,7 @@ function deleteSelectedPanel() {
   if (cur.panels.length <= 1) return;
   const choice = findBestDeleteEdge(panel);
   if (!choice) return;
+  recordUndo();
   // 隣接コマを削除パネル側へ拡張。qEdge は隣接コマ q のうち panel に接している辺。
   for (const { panel: q, edge: qEdge } of choice.neighbors) {
     if (qEdge === 'left') { q.x = panel.x; q.w += panel.w; }
@@ -759,6 +904,7 @@ function deleteSelectedPanel() {
 function splitSelectedPanel(direction) {
   const panel = getSelectedPanel();
   if (!panel) return;
+  recordUndo();
   const idx = cur.panels.indexOf(panel);
   // 素材は元コマ（先頭側）にだけ引き継ぐ。もう一方は空のコマになる。
   let a, b;
@@ -778,6 +924,7 @@ function splitSelectedPanel(direction) {
 function applyTemplate(templateId) {
   const tmpl = TEMPLATES[templateId];
   if (!tmpl) return;
+  recordUndo();
   cur.template = templateId;
   cur.panels = tmpl.panels.map((p) => ({
     id: cur.nextPanelId++,
@@ -847,6 +994,7 @@ function updateCanvasSizeControls() {
 }
 
 function applyCanvasSize(w, h) {
+  recordUndo();
   cur.canvasWidth = w;
   cur.canvasHeight = h;
   els.stage.style.width = `${w}px`;
@@ -893,6 +1041,7 @@ els.deletePanelBtn.addEventListener('click', () => deleteSelectedPanel());
 els.materialResetBtn.addEventListener('click', () => {
   const sel = getSelectedPanel();
   if (!sel || !sel.material) return;
+  recordUndo();
   sel.material.tx = 0;
   sel.material.ty = 0;
   sel.material.scale = 1;
@@ -905,6 +1054,7 @@ els.materialResetBtn.addEventListener('click', () => {
 els.materialRemoveBtn.addEventListener('click', () => {
   const sel = getSelectedPanel();
   if (!sel || !sel.material) return;
+  recordUndo();
   sel.material = null;
   renderPanels();
   updateActionButtons();
@@ -925,6 +1075,7 @@ els.panelContainer.addEventListener('dblclick', (e) => {
 els.deletePageBtn.addEventListener('click', () => {
   if (isPageEmpty(cur)) return;
   if (!confirm(`ページ ${state.currentPageIndex + 1} のコマ・素材・テキストをすべて消去します。よろしいですか?`)) return;
+  recordUndo();
   for (const l of cur.layers) l.el.remove();
   state.pages[state.currentPageIndex] = createEmptyPage();
   cur = state.pages[state.currentPageIndex];
@@ -1220,6 +1371,10 @@ document.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   if (e.altKey) return;
   const key = e.key.toLowerCase();
+  if (key === 'z' && !e.shiftKey && !isEditableTarget()) {
+    if (undoLastChange()) e.preventDefault();
+    return;
+  }
   if (key === 's') {
     e.preventDefault();
     if (!anyPageHasContent()) return;
@@ -1236,8 +1391,10 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-function addTextLayer({ x, y, text = 'テキスト', font, size, orientation, lineHeight, kind = 'text' }, targetPage = cur) {
-  const id = targetPage.nextId++;
+function addTextLayer({ id: requestedId, x, y, text = 'テキスト', font, size, orientation, lineHeight, kind = 'text' }, targetPage = cur) {
+  recordUndo();
+  const id = Number.isFinite(requestedId) ? requestedId : targetPage.nextId++;
+  targetPage.nextId = Math.max(targetPage.nextId, id + 1);
   const layer = {
     id,
     text,
@@ -1278,8 +1435,10 @@ function isOverlayLike(layer) {
   return layer && (layer.kind === 'overlay' || layer.kind === 'panelOverlay');
 }
 
-function addStickerLayer({ x, y, src, width, height, flipH, flipV }, targetPage = cur) {
-  const id = targetPage.nextId++;
+function addStickerLayer({ id: requestedId, x, y, src, width, height, flipH, flipV }, targetPage = cur) {
+  recordUndo();
+  const id = Number.isFinite(requestedId) ? requestedId : targetPage.nextId++;
+  targetPage.nextId = Math.max(targetPage.nextId, id + 1);
   const layer = {
     id,
     kind: 'sticker',
@@ -1328,8 +1487,10 @@ function addStickerLayer({ x, y, src, width, height, flipH, flipV }, targetPage 
 
 // 上重ね画像レイヤー(コマをまたぐ効果音や演出画像)。sticker と同じ DOM/ハンドラを再利用するが、
 // 描画順は sticker より背面、サイズ変更時はアスペクト比固定、画像は dataUrl で持つ。
-function addOverlayLayer({ x, y, src, width, height, naturalWidth, naturalHeight, flipH, flipV }, targetPage = cur) {
-  const id = targetPage.nextId++;
+function addOverlayLayer({ id: requestedId, x, y, src, width, height, naturalWidth, naturalHeight, flipH, flipV }, targetPage = cur) {
+  recordUndo();
+  const id = Number.isFinite(requestedId) ? requestedId : targetPage.nextId++;
+  targetPage.nextId = Math.max(targetPage.nextId, id + 1);
   const layer = {
     id,
     kind: 'overlay',
@@ -1388,8 +1549,10 @@ async function addOverlayFromFile(file, dropCoords) {
 // コマに重ねる画像レイヤー(panelOverlay)。挙動は overlay とほぼ同じだが、
 // 描画時に指定コマの矩形でクリップされる。コマ自体は移動せず、ユーザが画像を
 // 動かさない限り、コマからはみ出した部分は見えない。
-function addPanelOverlayLayer({ x, y, src, width, height, naturalWidth, naturalHeight, flipH, flipV, panelId }, targetPage = cur) {
-  const id = targetPage.nextId++;
+function addPanelOverlayLayer({ id: requestedId, x, y, src, width, height, naturalWidth, naturalHeight, flipH, flipV, panelId }, targetPage = cur) {
+  recordUndo();
+  const id = Number.isFinite(requestedId) ? requestedId : targetPage.nextId++;
+  targetPage.nextId = Math.max(targetPage.nextId, id + 1);
   const layer = {
     id,
     kind: 'panelOverlay',
@@ -1466,6 +1629,7 @@ function attachStickerHandlers(layer) {
     if (e.button !== 0) return;
     e.stopPropagation();
     selectLayer(layer.id);
+    recordUndo();
     const rect = els.layerContainer.getBoundingClientRect();
     const scaleX = cur.canvasWidth / rect.width;
     const scaleY = cur.canvasHeight / rect.height;
@@ -1510,6 +1674,7 @@ function attachStickerHandlers(layer) {
     if (cur.selectedId !== layer.id) return;
     if (!layer.width || !layer.height) return;
     e.preventDefault();
+    recordUndo();
     const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
     const cx = layer.x + layer.width / 2;
     const cy = layer.y + layer.height / 2;
@@ -1648,6 +1813,7 @@ function attachStickerHandleDrag(layer, el, corner) {
     if (e.button !== 0) return;
     e.stopPropagation();
     e.preventDefault();
+    recordUndo();
     const rect = els.layerContainer.getBoundingClientRect();
     const scaleX = cur.canvasWidth / rect.width;
     const scaleY = cur.canvasHeight / rect.height;
@@ -1718,6 +1884,7 @@ function attachLayerHandlers(layer) {
     if (el.classList.contains('editing')) return;
     e.stopPropagation();
     selectLayer(layer.id);
+    recordUndo();
 
     const rect = els.layerContainer.getBoundingClientRect();
     const scaleX = cur.canvasWidth / rect.width;
@@ -1770,6 +1937,7 @@ function enterEditMode(layer) {
   const finish = () => {
     layer.el.classList.remove('editing');
     layer.el.contentEditable = 'false';
+    recordUndo();
     layer.text = layer.el.innerText;
     els.propText.value = layer.text;
     layer.el.removeEventListener('blur', finish);
@@ -1828,6 +1996,7 @@ function isEditableTarget() {
 }
 
 function deleteLayer(layer) {
+  recordUndo();
   if (isStickerLike(layer)) removeStickerHandles(layer);
   layer.el.remove();
   cur.layers = cur.layers.filter((l) => l.id !== layer.id);
@@ -1998,6 +2167,10 @@ document.addEventListener('keydown', (e) => {
   // Ctrl+C: 選択中レイヤーをコピー / Ctrl+V: 現在ページに複製
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
     const k = e.key.toLowerCase();
+    if (k === 'z') {
+      if (undoLastChange()) e.preventDefault();
+      return;
+    }
     if (k === 'c') {
       if (copySelectedLayer()) e.preventDefault();
       return;
@@ -2025,6 +2198,7 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
     if (isStickerLike(layer)) return;
     e.preventDefault();
+    recordUndo();
     const sizeDelta = e.key === 'ArrowUp' ? 1 : -1;
     layer.size = Math.max(8, Math.min(120, layer.size + sizeDelta));
     applyLayerStyle(layer);
@@ -2036,6 +2210,7 @@ document.addEventListener('keydown', (e) => {
   const delta = ARROW_DELTAS[e.key];
   if (delta && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
+    recordUndo();
     // 吹き出しを矢印キーで動かしたときも内包テキストを追従させる。
     // 子の判定は移動前の sticker 矩形で行う。
     const children = layer.kind === 'sticker' ? findTextChildrenInSticker(layer) : [];
@@ -2148,6 +2323,7 @@ function updateInspector() {
 els.propText.addEventListener('input', () => {
   const layer = getSelectedLayer();
   if (!layer) return;
+  recordUndo();
   layer.text = els.propText.value;
   layer.el.textContent = layer.text;
   applyLayerStyle(layer);
@@ -2157,6 +2333,7 @@ els.propText.addEventListener('input', () => {
 els.propFont.addEventListener('change', () => {
   const layer = getSelectedLayer();
   if (!layer) return;
+  recordUndo();
   layer.font = els.propFont.value;
   applyLayerStyle(layer);
   renderTextPreview();
@@ -2165,6 +2342,7 @@ els.propFont.addEventListener('change', () => {
 els.propSize.addEventListener('input', () => {
   const layer = getSelectedLayer();
   if (!layer) return;
+  recordUndo();
   layer.size = Number(els.propSize.value);
   els.propSizeValue.textContent = String(layer.size);
   applyLayerStyle(layer);
@@ -2174,6 +2352,7 @@ els.propSize.addEventListener('input', () => {
 els.propOrientation.addEventListener('change', () => {
   const layer = getSelectedLayer();
   if (!layer) return;
+  recordUndo();
   layer.orientation = els.propOrientation.value;
   applyLayerStyle(layer);
   renderTextPreview();
@@ -2182,6 +2361,7 @@ els.propOrientation.addEventListener('change', () => {
 els.propLineHeight.addEventListener('input', () => {
   const layer = getSelectedLayer();
   if (!layer) return;
+  recordUndo();
   layer.lineHeight = Number(els.propLineHeight.value);
   els.propLineHeightValue.textContent = String(layer.lineHeight);
   applyLayerStyle(layer);
@@ -2197,6 +2377,7 @@ els.propDelete.addEventListener('click', () => {
 els.stickerFlipH.addEventListener('click', () => {
   const layer = getSelectedLayer();
   if (!isStickerLike(layer)) return;
+  recordUndo();
   layer.flipH = !layer.flipH;
   applyStickerStyle(layer);
   els.stickerFlipH.classList.toggle('active', layer.flipH);
@@ -2205,6 +2386,7 @@ els.stickerFlipH.addEventListener('click', () => {
 els.stickerFlipV.addEventListener('click', () => {
   const layer = getSelectedLayer();
   if (!isStickerLike(layer)) return;
+  recordUndo();
   layer.flipV = !layer.flipV;
   applyStickerStyle(layer);
   els.stickerFlipV.classList.toggle('active', layer.flipV);
@@ -2245,6 +2427,7 @@ function initBubblePicker() {
 
 function changeStickerSrc(layer, src) {
   if (layer.src === src) return;
+  recordUndo();
   layer.src = src;
   layer.el.src = src;
   // 新しい画像の自然サイズに合わせて高さを再計算(幅は維持)
@@ -2308,6 +2491,7 @@ function initFocusPicker() {
 function applyFocusPick(src) {
   const sel = getSelectedPanel();
   if (!sel) return;
+  recordUndo();
   if (!src) {
     sel.focus = null;
   } else if (sel.focus && sel.focus.src === src) {
@@ -2362,6 +2546,7 @@ initFocusPicker();
 els.focusScaleInput.addEventListener('input', () => {
   const sel = getSelectedPanel();
   if (!sel || !sel.focus) return;
+  recordUndo();
   const v = Math.max(FOCUS_SCALE_MIN, Math.min(FOCUS_SCALE_MAX, Number(els.focusScaleInput.value) || 1));
   sel.focus.scale = v;
   els.focusScaleValue.textContent = v.toFixed(2);
@@ -2371,6 +2556,7 @@ els.focusScaleInput.addEventListener('input', () => {
 els.focusRotationInput.addEventListener('input', () => {
   const sel = getSelectedPanel();
   if (!sel || !sel.focus) return;
+  recordUndo();
   const v = Math.max(-180, Math.min(180, Number(els.focusRotationInput.value) || 0));
   sel.focus.rotation = v;
   els.focusRotationValue.textContent = String(Math.round(v));
@@ -2380,6 +2566,7 @@ els.focusRotationInput.addEventListener('input', () => {
 els.focusResetBtn.addEventListener('click', () => {
   const sel = getSelectedPanel();
   if (!sel || !sel.focus) return;
+  recordUndo();
   sel.focus.scale = 1;
   sel.focus.rotation = 0;
   updateFocusControls();
@@ -2862,11 +3049,14 @@ function buildProjectData(page = cur, overlayFileById = new Map()) {
 }
 
 async function applyProjectData(data, targetPage = cur, overlayEntries = {}) {
-  for (const l of targetPage.layers) l.el.remove();
-  targetPage.layers = [];
-  targetPage.selectedId = null;
-  targetPage.nextId = 1;
-  for (const l of data.layers) {
+  const wasRestoringUndo = isRestoringUndo;
+  isRestoringUndo = true;
+  try {
+    for (const l of targetPage.layers) l.el.remove();
+    targetPage.layers = [];
+    targetPage.selectedId = null;
+    targetPage.nextId = 1;
+    for (const l of data.layers) {
     if (l.kind === 'sticker') {
       addStickerLayer({
         x: Number(l.x) || 0,
@@ -2941,7 +3131,10 @@ async function applyProjectData(data, targetPage = cur, overlayEntries = {}) {
       kind: (l.kind === 'monologue' || l.kind === 'bubble') ? l.kind : 'text',
     }, targetPage);
   }
-  if (targetPage === cur) deselect();
+    if (targetPage === cur) deselect();
+  } finally {
+    isRestoringUndo = wasRestoringUndo;
+  }
 }
 
 function extFromMime(mime) {
@@ -3267,6 +3460,7 @@ els.memoClose.addEventListener('click', () => {
 
 // textarea への入力を現在ページのメモに反映
 els.memoText.addEventListener('input', () => {
+  recordUndo();
   cur.memo = els.memoText.value;
 });
 
@@ -3282,6 +3476,7 @@ function loadMemoFile(file) {
       // UTF-8 として読めない場合は Shift_JIS にフォールバック
       text = new TextDecoder('shift_jis').decode(buf);
     }
+    recordUndo();
     cur.memo = text;
     els.memoText.value = text;
     els.memoPanel.hidden = false;
