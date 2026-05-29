@@ -79,6 +79,7 @@ const els = {
   bubblePickerField: document.getElementById('bubblePickerField'),
   bubblePicker: document.getElementById('bubblePicker'),
   overlayFileInput: document.getElementById('overlayFileInput'),
+  panelOverlayFileInput: document.getElementById('panelOverlayFileInput'),
   memoToggle: document.getElementById('memoToggle'),
   memoPanel: document.getElementById('memoPanel'),
   memoHeader: document.getElementById('memoHeader'),
@@ -306,9 +307,13 @@ function refreshPageView() {
   updateCanvasSizeControls();
   if (els.templateSelect) els.templateSelect.value = cur.template;
   // 現在ページのレイヤー DOM を layerContainer に並べ直す。
-  // 描画順(奥→手前): overlay → sticker → previewCanvas → text。
-  // overlay と sticker はどちらも previewCanvas の前に挿入するが、overlay を先に挿入することで
-  // sticker より背面になる(同じアンカーへの insertBefore は順次積まれる)。
+  // 描画順(奥→手前): panelOverlay → overlay → sticker → previewCanvas → text。
+  // すべて previewCanvas の前に積み、テキストは canvas の後に置く。
+  for (const l of cur.layers) {
+    if (l.kind === 'panelOverlay') {
+      els.layerContainer.insertBefore(l.el, previewCanvas);
+    }
+  }
   for (const l of cur.layers) {
     if (l.kind === 'overlay') {
       els.layerContainer.insertBefore(l.el, previewCanvas);
@@ -317,7 +322,7 @@ function refreshPageView() {
   for (const l of cur.layers) {
     if (l.kind === 'sticker') {
       els.layerContainer.insertBefore(l.el, previewCanvas);
-    } else if (l.kind !== 'overlay') {
+    } else if (!isOverlayLike(l)) {
       els.layerContainer.appendChild(l.el);
     }
   }
@@ -456,6 +461,10 @@ function startEdgeDrag(panel, edge, startEvent) {
         const fimg = el.querySelector('.panel-focus');
         if (fimg) applyFocusTransform(fimg, s.panel, el);
       }
+    }
+    // コマに重ねた画像レイヤーのクリップ範囲もコマの新しい矩形に追随させる。
+    for (const l of cur.layers) {
+      if (l.kind === 'panelOverlay') applyPanelOverlayClip(l);
     }
   };
   const onUp = () => {
@@ -1123,8 +1132,38 @@ els.contextMenu.addEventListener('click', (e) => {
     pendingOverlayCoords = { ...contextMenuTargetCoords };
     els.overlayFileInput.value = '';
     els.overlayFileInput.click();
+  } else if (action === 'add-panel-overlay') {
+    const panel = findPanelAtCanvasCoords(contextMenuTargetCoords.x, contextMenuTargetCoords.y);
+    if (!panel) {
+      alert('コマの上で右クリックしてください。');
+      return;
+    }
+    pendingPanelOverlay = { coords: { ...contextMenuTargetCoords }, panelId: panel.id };
+    els.panelOverlayFileInput.value = '';
+    els.panelOverlayFileInput.click();
   }
 });
+
+// キャンバス座標(canvasWidth/Height 基準)を含むコマを返す。コマ間の gutter にあたる
+// 隙間に乗っているときは null。
+function findPanelAtCanvasCoords(x, y) {
+  const w = cur.canvasWidth;
+  const h = cur.canvasHeight;
+  if (w === 0 || h === 0) return null;
+  const previewW = els.panelContainer.clientWidth || w;
+  const displayScale = previewW / w;
+  const gutterCss = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--panel-gutter')) || 0;
+  const gutterPx = displayScale > 0 ? gutterCss / displayScale : 0;
+  const half = gutterPx / 2;
+  for (const p of cur.panels) {
+    const left = p.x * w + half;
+    const top = p.y * h + half;
+    const right = (p.x + p.w) * w - half;
+    const bottom = (p.y + p.h) * h - half;
+    if (x >= left && x <= right && y >= top && y <= bottom) return p;
+  }
+  return null;
+}
 
 let pendingOverlayCoords = null;
 els.overlayFileInput.addEventListener('change', () => {
@@ -1138,6 +1177,24 @@ els.overlayFileInput.addEventListener('change', () => {
     return;
   }
   addOverlayFromFile(file, coords).catch((err) => {
+    console.error(err);
+    alert('画像の読み込みに失敗しました: ' + (err && err.message ? err.message : err));
+  });
+});
+
+let pendingPanelOverlay = null;
+els.panelOverlayFileInput.addEventListener('change', () => {
+  const file = els.panelOverlayFileInput.files && els.panelOverlayFileInput.files[0];
+  els.panelOverlayFileInput.value = '';
+  if (!file) { pendingPanelOverlay = null; return; }
+  const pending = pendingPanelOverlay;
+  pendingPanelOverlay = null;
+  if (!pending) return;
+  if (detectFileKind(file) !== 'image') {
+    alert('画像ファイルを指定してください。');
+    return;
+  }
+  addPanelOverlayFromFile(file, pending.coords, pending.panelId).catch((err) => {
     console.error(err);
     alert('画像の読み込みに失敗しました: ' + (err && err.message ? err.message : err));
   });
@@ -1214,7 +1271,11 @@ function addTextLayer({ x, y, text = 'テキスト', font, size, orientation, li
 // 吹き出しステッカー(独立配置の画像レイヤー)。テキストレイヤー配列(cur.layers)に
 // 同居させて、選択/削除/Delete/矢印キー移動などの既存ロジックを再利用する。
 function isStickerLike(layer) {
-  return layer && (layer.kind === 'sticker' || layer.kind === 'overlay');
+  return layer && (layer.kind === 'sticker' || layer.kind === 'overlay' || layer.kind === 'panelOverlay');
+}
+
+function isOverlayLike(layer) {
+  return layer && (layer.kind === 'overlay' || layer.kind === 'panelOverlay');
 }
 
 function addStickerLayer({ x, y, src, width, height, flipH, flipV }, targetPage = cur) {
@@ -1324,6 +1385,80 @@ async function addOverlayFromFile(file, dropCoords) {
   });
 }
 
+// コマに重ねる画像レイヤー(panelOverlay)。挙動は overlay とほぼ同じだが、
+// 描画時に指定コマの矩形でクリップされる。コマ自体は移動せず、ユーザが画像を
+// 動かさない限り、コマからはみ出した部分は見えない。
+function addPanelOverlayLayer({ x, y, src, width, height, naturalWidth, naturalHeight, flipH, flipV, panelId }, targetPage = cur) {
+  const id = targetPage.nextId++;
+  const layer = {
+    id,
+    kind: 'panelOverlay',
+    panelId,
+    src,
+    x,
+    y,
+    width: width || 0,
+    height: height || 0,
+    naturalWidth: naturalWidth || 0,
+    naturalHeight: naturalHeight || 0,
+    flipH: !!flipH,
+    flipV: !!flipV,
+    el: null,
+  };
+  const el = document.createElement('img');
+  el.className = 'sticker-layer';
+  el.draggable = false;
+  el.dataset.id = String(id);
+  el.src = src;
+  layer.el = el;
+  targetPage.layers.push(layer);
+  attachStickerHandlers(layer);
+  if (targetPage === cur) {
+    // panelOverlay は overlay と同じく previewCanvas の前に挿入(背面寄り)。
+    // 既存 overlay/sticker よりさらに背面に置きたいので、最も先頭の overlay/sticker
+    // を見つけ、その前に挿入する。
+    const firstImg = cur.layers.find((l) => l !== layer && (l.kind === 'overlay' || l.kind === 'sticker'));
+    const anchor = firstImg ? firstImg.el : previewCanvas;
+    els.layerContainer.insertBefore(el, anchor);
+    applyStickerStyle(layer);
+    selectLayer(id);
+    updateActionButtons();
+  }
+}
+
+// 画像ファイルから panelOverlay を作る。指定コマの中心に、コマ幅の 80% で配置。
+async function addPanelOverlayFromFile(file, dropCoords, panelId) {
+  const panel = cur.panels.find((p) => p.id === panelId);
+  if (!panel) {
+    alert('対象のコマが見つかりませんでした。');
+    return;
+  }
+  const dataUrl = await blobToDataUrl(file);
+  const sz = await getImageNaturalSize(dataUrl);
+  const panelW = panel.w * cur.canvasWidth;
+  const panelH = panel.h * cur.canvasHeight;
+  // コマに収まりやすいよう、コマの短辺を基準に 80% を初期幅とする(アスペクト維持)
+  const aspect = sz.width === 0 ? 1 : sz.height / sz.width;
+  let w = panelW * 0.8;
+  let h = w * aspect;
+  if (h > panelH * 0.8) {
+    h = panelH * 0.8;
+    w = aspect === 0 ? w : h / aspect;
+  }
+  const cx = dropCoords ? dropCoords.x : (panel.x + panel.w / 2) * cur.canvasWidth;
+  const cy = dropCoords ? dropCoords.y : (panel.y + panel.h / 2) * cur.canvasHeight;
+  addPanelOverlayLayer({
+    x: cx - w / 2,
+    y: cy - h / 2,
+    src: dataUrl,
+    width: w,
+    height: h,
+    naturalWidth: sz.width,
+    naturalHeight: sz.height,
+    panelId,
+  });
+}
+
 function attachStickerHandlers(layer) {
   const el = layer.el;
 
@@ -1384,7 +1519,60 @@ function applyStickerStyle(layer) {
   const sx = layer.flipH ? -1 : 1;
   const sy = layer.flipV ? -1 : 1;
   el.style.transform = (sx === 1 && sy === 1) ? '' : `scale(${sx}, ${sy})`;
+  applyPanelOverlayClip(layer);
   positionStickerHandles(layer, scale);
+}
+
+// panelOverlay レイヤーを参照コマの矩形でクリップする。clip-path は要素自身の
+// ボックス基準の inset 値(top right bottom left)で指定する。flip による rotate/scale
+// transform 後に clip-path が効くため、flipH/V を考慮して左右・上下の inset を入れ替える。
+function applyPanelOverlayClip(layer) {
+  if (!layer || layer.kind !== 'panelOverlay') return;
+  const el = layer.el;
+  if (!el) return;
+  const panel = cur.panels.find((p) => p.id === layer.panelId);
+  if (!panel) {
+    el.style.clipPath = '';
+    return;
+  }
+  const lw = layer.width || 0;
+  const lh = layer.height || 0;
+  if (lw <= 0 || lh <= 0) {
+    el.style.clipPath = '';
+    return;
+  }
+  // キャンバス座標系(canvasWidth/Height 基準)でコマの内接矩形を gutter 込みで計算。
+  const w = cur.canvasWidth;
+  const h = cur.canvasHeight;
+  const previewW = els.panelContainer.clientWidth || w;
+  const displayScale = previewW / w;
+  const gutterCss = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--panel-gutter')) || 0;
+  const gutterCanvas = displayScale > 0 ? gutterCss / displayScale : 0;
+  const half = gutterCanvas / 2;
+  const panelLeft = panel.x * w + half;
+  const panelTop = panel.y * h + half;
+  const panelRight = (panel.x + panel.w) * w - half;
+  const panelBottom = (panel.y + panel.h) * h - half;
+  // 画像のレイヤー座標における各辺のはみ出し量。負(panel が外側)は 0 にクランプ。
+  let topIn = Math.max(0, panelTop - layer.y);
+  let leftIn = Math.max(0, panelLeft - layer.x);
+  let rightIn = Math.max(0, (layer.x + lw) - panelRight);
+  let bottomIn = Math.max(0, (layer.y + lh) - panelBottom);
+  // 画像より大きく食い込んだら全クリップ
+  if (topIn >= lh || bottomIn >= lh || leftIn >= lw || rightIn >= lw) {
+    el.style.clipPath = 'inset(50%)';
+    return;
+  }
+  // flip transform は要素の中心軸で起きるが clip-path は transform 前のボックス基準で
+  // 評価される(=画面上で同じ方向の辺を切り取る)ため、flip 適用時は左右/上下を入れ替える。
+  if (layer.flipH) [leftIn, rightIn] = [rightIn, leftIn];
+  if (layer.flipV) [topIn, bottomIn] = [bottomIn, topIn];
+  // displayScale を掛けて CSS px に変換。
+  const t = topIn * displayScale;
+  const r = rightIn * displayScale;
+  const b = bottomIn * displayScale;
+  const l = leftIn * displayScale;
+  el.style.clipPath = `inset(${t}px ${r}px ${b}px ${l}px)`;
 }
 
 const STICKER_HANDLE_CORNERS = ['nw', 'ne', 'sw', 'se'];
@@ -1455,7 +1643,7 @@ function attachStickerHandleDrag(layer, el, corner) {
     const origY = layer.y;
     const origW = layer.width;
     const origH = layer.height;
-    const aspectLocked = layer.kind === 'overlay';
+    const aspectLocked = isOverlayLike(layer);
     const aspect = origW > 0 ? origH / origW : 1;
     const onMove = (ev) => {
       const dx = (ev.clientX - startX) * scaleX;
@@ -1682,6 +1870,18 @@ function copySelectedLayer() {
         flipH: layer.flipH, flipV: layer.flipV,
       },
     };
+  } else if (layer.kind === 'panelOverlay') {
+    clipboard = {
+      kind: 'panelOverlay',
+      data: {
+        src: layer.src,
+        x: layer.x, y: layer.y,
+        width: layer.width, height: layer.height,
+        naturalWidth: layer.naturalWidth, naturalHeight: layer.naturalHeight,
+        flipH: layer.flipH, flipV: layer.flipV,
+        panelId: layer.panelId,
+      },
+    };
   } else if (layer.kind === 'sticker') {
     clipboard = {
       kind: 'sticker',
@@ -1757,6 +1957,15 @@ function pasteFromClipboard() {
       width: d.width, height: d.height,
       naturalWidth: d.naturalWidth, naturalHeight: d.naturalHeight,
       flipH: d.flipH, flipV: d.flipV,
+    });
+  } else if (clipboard.kind === 'panelOverlay') {
+    addPanelOverlayLayer({
+      x: d.x, y: d.y,
+      src: d.src,
+      width: d.width, height: d.height,
+      naturalWidth: d.naturalWidth, naturalHeight: d.naturalHeight,
+      flipH: d.flipH, flipV: d.flipV,
+      panelId: d.panelId,
     });
   }
   return true;
@@ -1886,13 +2095,18 @@ function updateInspector() {
   if (isStickerLike(layer)) {
     els.textProps.hidden = true;
     els.stickerProps.hidden = false;
-    const isOverlay = layer.kind === 'overlay';
-    els.stickerTitle.textContent = isOverlay ? '選択中の上重ね画像' : '選択中の吹き出し';
+    const isOverlay = isOverlayLike(layer);
+    const isPanelOverlay = layer.kind === 'panelOverlay';
+    els.stickerTitle.textContent = isPanelOverlay
+      ? '選択中のコマ重ね画像'
+      : (isOverlay ? '選択中の上重ね画像' : '選択中の吹き出し');
     els.stickerHint.textContent = isOverlay
       ? 'ドラッグで移動 / 四隅でリサイズ(アスペクト比固定) / ホイールで拡縮'
       : 'ドラッグで移動 / 四隅でリサイズ / ホイールで拡縮';
     els.bubblePickerField.hidden = isOverlay;
-    els.stickerDelete.textContent = isOverlay ? 'この上重ね画像を削除' : 'この吹き出しを削除';
+    els.stickerDelete.textContent = isPanelOverlay
+      ? 'このコマ重ね画像を削除'
+      : (isOverlay ? 'この上重ね画像を削除' : 'この吹き出しを削除');
     if (!isOverlay) updateBubblePickerSelection(layer);
     els.stickerFlipH.classList.toggle('active', !!layer.flipH);
     els.stickerFlipV.classList.toggle('active', !!layer.flipV);
@@ -2596,6 +2810,21 @@ function buildProjectData(page = cur, overlayFileById = new Map()) {
           flipV: !!l.flipV,
         };
       }
+      if (l.kind === 'panelOverlay') {
+        return {
+          kind: 'panelOverlay',
+          file: overlayFileById.get(l.id) || null,
+          panelId: l.panelId,
+          x: l.x,
+          y: l.y,
+          width: l.width,
+          height: l.height,
+          naturalWidth: l.naturalWidth || 0,
+          naturalHeight: l.naturalHeight || 0,
+          flipH: !!l.flipH,
+          flipV: !!l.flipV,
+        };
+      }
       return {
         text: l.text,
         x: l.x,
@@ -2653,6 +2882,32 @@ async function applyProjectData(data, targetPage = cur, overlayEntries = {}) {
       }
       continue;
     }
+    if (l.kind === 'panelOverlay') {
+      const entry = l.file ? overlayEntries[l.file] : null;
+      if (!entry) {
+        console.warn(`コマ重ね画像のファイルが見つかりません: ${l.file}`);
+        continue;
+      }
+      try {
+        const blob = await entry.async('blob');
+        const dataUrl = await blobToDataUrl(blob);
+        addPanelOverlayLayer({
+          x: Number(l.x) || 0,
+          y: Number(l.y) || 0,
+          src: dataUrl,
+          width: typeof l.width === 'number' ? l.width : 0,
+          height: typeof l.height === 'number' ? l.height : 0,
+          naturalWidth: typeof l.naturalWidth === 'number' ? l.naturalWidth : 0,
+          naturalHeight: typeof l.naturalHeight === 'number' ? l.naturalHeight : 0,
+          flipH: !!l.flipH,
+          flipV: !!l.flipV,
+          panelId: Number(l.panelId) || null,
+        }, targetPage);
+      } catch (err) {
+        console.warn(`コマ重ね画像の展開に失敗 (${l.file}):`, err);
+      }
+      continue;
+    }
     addTextLayer({
       x: Number(l.x) || 0,
       y: Number(l.y) || 0,
@@ -2700,10 +2955,10 @@ async function buildBundleBlob() {
   zip.file('manifest.json', JSON.stringify({ version: BUNDLE_VERSION, pages: state.pages.length }));
   state.pages.forEach((page, i) => {
     const idx = i + 1;
-    // 上重ね画像を先に zip に書き込み、layer.id → file パスのマップを作る
+    // 上重ね画像/コマ重ね画像を先に zip に書き込み、layer.id → file パスのマップを作る
     const overlayFileById = new Map();
     for (const l of page.layers) {
-      if (l.kind !== 'overlay' || typeof l.src !== 'string') continue;
+      if (!isOverlayLike(l) || typeof l.src !== 'string') continue;
       try {
         const blob = dataUrlToBlob(l.src);
         const ext = extFromMime(blob.type);
@@ -3055,11 +3310,16 @@ els.exportBtn.addEventListener('click', async () => {
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, pageW, pageH);
     await drawPanelsAndMaterials(ctx, cur, pageW, pageH);
-    // 画像系レイヤー(overlay / sticker)を並列ロード。
+    // 画像系レイヤー(panelOverlay / overlay / sticker)を並列ロード。
     // sticker はアセットパス由来なので tainted を避けるため fetch→dataURL 経由で読む。
     const layerImgs = await Promise.all(
       cur.layers.map((l) => (isStickerLike(l) ? loadImageForCanvas(l.src).catch(() => null) : null))
     );
+    // panelOverlay は出力サイズの gutter を使ってコマ矩形を再計算する
+    const previewW = els.panelContainer.clientWidth || pageW;
+    const exportScale = pageW / previewW;
+    const gutterCss = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--panel-gutter')) || 0;
+    const exportGutterPx = gutterCss * exportScale;
     const drawImageLayer = (layer, img) => {
       if (!img || !(layer.width > 0 && layer.height > 0)) return;
       if (layer.flipH || layer.flipV) {
@@ -3076,7 +3336,23 @@ els.exportBtn.addEventListener('click', async () => {
         ctx.drawImage(img, layer.x, layer.y, layer.width, layer.height);
       }
     };
-    // 描画順(奥→手前): overlay → sticker → text。DOM の積み順と合わせる。
+    const drawPanelOverlayLayer = (layer, img) => {
+      if (!img || !(layer.width > 0 && layer.height > 0)) return;
+      const panel = cur.panels.find((p) => p.id === layer.panelId);
+      if (!panel) return;
+      const rect = computePanelPixelRect(panel, pageW, pageH, exportGutterPx);
+      if (rect.w <= 0 || rect.h <= 0) return;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(rect.x, rect.y, rect.w, rect.h);
+      ctx.clip();
+      drawImageLayer(layer, img);
+      ctx.restore();
+    };
+    // 描画順(奥→手前): panelOverlay → overlay → sticker → text。DOM の積み順と合わせる。
+    cur.layers.forEach((layer, i) => {
+      if (layer.kind === 'panelOverlay') drawPanelOverlayLayer(layer, layerImgs[i]);
+    });
     cur.layers.forEach((layer, i) => {
       if (layer.kind === 'overlay') drawImageLayer(layer, layerImgs[i]);
     });
