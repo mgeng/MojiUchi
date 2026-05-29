@@ -1473,10 +1473,24 @@ function attachStickerHandlers(layer) {
     const startY = e.clientY;
     const origX = layer.x;
     const origY = layer.y;
+    // 吹き出し本体をドラッグするときは内包テキストも追従させる。
+    // ドラッグ中に sticker 矩形が動くと findTextChildrenInSticker の判定がブレるので、
+    // 開始時点での子レイヤーと原点を凍結しておく。
+    const children = layer.kind === 'sticker'
+      ? findTextChildrenInSticker(layer).map((c) => ({ layer: c, x: c.x, y: c.y }))
+      : [];
     const onMove = (ev) => {
-      layer.x = origX + (ev.clientX - startX) * scaleX;
-      layer.y = origY + (ev.clientY - startY) * scaleY;
+      const dx = (ev.clientX - startX) * scaleX;
+      const dy = (ev.clientY - startY) * scaleY;
+      layer.x = origX + dx;
+      layer.y = origY + dy;
       applyStickerStyle(layer);
+      for (const c of children) {
+        c.layer.x = c.x + dx;
+        c.layer.y = c.y + dy;
+        applyLayerStyle(c.layer);
+      }
+      if (children.length > 0) renderTextPreview();
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
@@ -2022,9 +2036,17 @@ document.addEventListener('keydown', (e) => {
   const delta = ARROW_DELTAS[e.key];
   if (delta && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
+    // 吹き出しを矢印キーで動かしたときも内包テキストを追従させる。
+    // 子の判定は移動前の sticker 矩形で行う。
+    const children = layer.kind === 'sticker' ? findTextChildrenInSticker(layer) : [];
     layer.x += delta.dx;
     layer.y += delta.dy;
     applyLayerStyle(layer);
+    for (const c of children) {
+      c.x += delta.dx;
+      c.y += delta.dy;
+      applyLayerStyle(c);
+    }
     renderTextPreview();
     return;
   }
