@@ -36,6 +36,7 @@ const els = {
   fileInput: document.getElementById('fileInput'),
   openBtn: document.getElementById('openBtn'),
   exportBtn: document.getElementById('exportBtn'),
+  exportAllBtn: document.getElementById('exportAllBtn'),
   stageWrapper: document.getElementById('stageWrapper'),
   stage: document.getElementById('stage'),
   layerContainer: document.getElementById('layerContainer'),
@@ -585,6 +586,7 @@ function syncMemoFromPage() {
 // 素材セット/外し、テキスト追加/削除など hasPageContent に影響する操作の後に呼ぶ。
 function updateActionButtons() {
   els.exportBtn.disabled = !hasPageVisualContent(cur);
+  els.exportAllBtn.disabled = !anyPageHasContent();
   els.saveProjectBtn.disabled = !anyPageHasContent();
   els.deletePageBtn.disabled = !hasPageContent(cur);
 }
@@ -3743,76 +3745,83 @@ els.memoHeader.addEventListener('mousedown', (e) => {
   document.addEventListener('mouseup', onUp);
 });
 
+// 現在表示中のページ(cur)を 1 枚の PNG Blob にレンダリングする。
+// gutter/border のスケールは現在の DOM 表示幅(panelContainer.clientWidth)に依存するため、
+// 一括書き出しでは呼び出し側で switchToPage により対象ページを表示してから呼ぶこと。
+async function renderCurrentPageToPngBlob() {
+  await ensureExportFontsReady();
+
+  const pageW = cur.canvasWidth;
+  const pageH = cur.canvasHeight;
+  const canvas = document.createElement('canvas');
+  canvas.width = pageW;
+  canvas.height = pageH;
+  const ctx = canvas.getContext('2d');
+  // 背景は白いページとして塗りつぶす
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, pageW, pageH);
+  await drawPanelsAndMaterials(ctx, cur, pageW, pageH);
+  // 画像系レイヤー(panelOverlay / overlay / sticker)を並列ロード。
+  // sticker はアセットパス由来なので tainted を避けるため fetch→dataURL 経由で読む。
+  const layerImgs = await Promise.all(
+    cur.layers.map((l) => (isStickerLike(l) ? loadImageForCanvas(l.src).catch(() => null) : null))
+  );
+  // panelOverlay は出力サイズの gutter を使ってコマ矩形を再計算する
+  const previewW = els.panelContainer.clientWidth || pageW;
+  const exportScale = pageW / previewW;
+  const gutterCss = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--panel-gutter')) || 0;
+  const exportGutterPx = gutterCss * exportScale;
+  const drawImageLayer = (layer, img) => {
+    if (!img || !(layer.width > 0 && layer.height > 0)) return;
+    if (layer.flipH || layer.flipV) {
+      const sx = layer.flipH ? -1 : 1;
+      const sy = layer.flipV ? -1 : 1;
+      const tx = layer.x + (layer.flipH ? layer.width : 0);
+      const ty = layer.y + (layer.flipV ? layer.height : 0);
+      ctx.save();
+      ctx.translate(tx, ty);
+      ctx.scale(sx, sy);
+      ctx.drawImage(img, 0, 0, layer.width, layer.height);
+      ctx.restore();
+    } else {
+      ctx.drawImage(img, layer.x, layer.y, layer.width, layer.height);
+    }
+  };
+  const drawPanelOverlayLayer = (layer, img) => {
+    if (!img || !(layer.width > 0 && layer.height > 0)) return;
+    const panel = cur.panels.find((p) => p.id === layer.panelId);
+    if (!panel) return;
+    const rect = computePanelPixelRect(panel, pageW, pageH, exportGutterPx);
+    if (rect.w <= 0 || rect.h <= 0) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(rect.x, rect.y, rect.w, rect.h);
+    ctx.clip();
+    drawImageLayer(layer, img);
+    ctx.restore();
+  };
+  // 描画順(奥→手前): panelOverlay → overlay → sticker → text。DOM の積み順と合わせる。
+  cur.layers.forEach((layer, i) => {
+    if (layer.kind === 'panelOverlay') drawPanelOverlayLayer(layer, layerImgs[i]);
+  });
+  cur.layers.forEach((layer, i) => {
+    if (layer.kind === 'overlay') drawImageLayer(layer, layerImgs[i]);
+  });
+  cur.layers.forEach((layer, i) => {
+    if (layer.kind === 'sticker') drawImageLayer(layer, layerImgs[i]);
+  });
+  cur.layers.forEach((layer) => {
+    if (!isStickerLike(layer)) drawTextLayer(ctx, layer);
+  });
+
+  return canvasToPngBlob(canvas);
+}
+
 els.exportBtn.addEventListener('click', async () => {
   if (!hasPageVisualContent(cur)) return;
   els.exportBtn.disabled = true;
   try {
-    await ensureExportFontsReady();
-
-    const pageW = cur.canvasWidth;
-    const pageH = cur.canvasHeight;
-    const canvas = document.createElement('canvas');
-    canvas.width = pageW;
-    canvas.height = pageH;
-    const ctx = canvas.getContext('2d');
-    // 背景は白いページとして塗りつぶす
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, pageW, pageH);
-    await drawPanelsAndMaterials(ctx, cur, pageW, pageH);
-    // 画像系レイヤー(panelOverlay / overlay / sticker)を並列ロード。
-    // sticker はアセットパス由来なので tainted を避けるため fetch→dataURL 経由で読む。
-    const layerImgs = await Promise.all(
-      cur.layers.map((l) => (isStickerLike(l) ? loadImageForCanvas(l.src).catch(() => null) : null))
-    );
-    // panelOverlay は出力サイズの gutter を使ってコマ矩形を再計算する
-    const previewW = els.panelContainer.clientWidth || pageW;
-    const exportScale = pageW / previewW;
-    const gutterCss = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--panel-gutter')) || 0;
-    const exportGutterPx = gutterCss * exportScale;
-    const drawImageLayer = (layer, img) => {
-      if (!img || !(layer.width > 0 && layer.height > 0)) return;
-      if (layer.flipH || layer.flipV) {
-        const sx = layer.flipH ? -1 : 1;
-        const sy = layer.flipV ? -1 : 1;
-        const tx = layer.x + (layer.flipH ? layer.width : 0);
-        const ty = layer.y + (layer.flipV ? layer.height : 0);
-        ctx.save();
-        ctx.translate(tx, ty);
-        ctx.scale(sx, sy);
-        ctx.drawImage(img, 0, 0, layer.width, layer.height);
-        ctx.restore();
-      } else {
-        ctx.drawImage(img, layer.x, layer.y, layer.width, layer.height);
-      }
-    };
-    const drawPanelOverlayLayer = (layer, img) => {
-      if (!img || !(layer.width > 0 && layer.height > 0)) return;
-      const panel = cur.panels.find((p) => p.id === layer.panelId);
-      if (!panel) return;
-      const rect = computePanelPixelRect(panel, pageW, pageH, exportGutterPx);
-      if (rect.w <= 0 || rect.h <= 0) return;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(rect.x, rect.y, rect.w, rect.h);
-      ctx.clip();
-      drawImageLayer(layer, img);
-      ctx.restore();
-    };
-    // 描画順(奥→手前): panelOverlay → overlay → sticker → text。DOM の積み順と合わせる。
-    cur.layers.forEach((layer, i) => {
-      if (layer.kind === 'panelOverlay') drawPanelOverlayLayer(layer, layerImgs[i]);
-    });
-    cur.layers.forEach((layer, i) => {
-      if (layer.kind === 'overlay') drawImageLayer(layer, layerImgs[i]);
-    });
-    cur.layers.forEach((layer, i) => {
-      if (layer.kind === 'sticker') drawImageLayer(layer, layerImgs[i]);
-    });
-    cur.layers.forEach((layer) => {
-      if (!isStickerLike(layer)) drawTextLayer(ctx, layer);
-    });
-
-    const pngBlob = await canvasToPngBlob(canvas);
+    const pngBlob = await renderCurrentPageToPngBlob();
     await saveBlob(pngBlob, `gina-p${state.currentPageIndex + 1}.png`, {
       description: 'PNG画像',
       mimeType: 'image/png',
@@ -3823,5 +3832,50 @@ els.exportBtn.addEventListener('click', async () => {
     alert('PNG 書き出しに失敗しました: ' + (err && err.message ? err.message : err));
   } finally {
     els.exportBtn.disabled = !hasPageVisualContent(cur);
+  }
+});
+
+// 次フレームまで待ってレイアウトを確定させる(ページ切替後の DOM 計測のため)
+function nextFrame() {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+// 全ページを順に表示しながら PNG 化し、1 つの ZIP にまとめて書き出す(簡易版)。
+els.exportAllBtn.addEventListener('click', async () => {
+  const targets = state.pages
+    .map((page, index) => ({ page, index }))
+    .filter(({ page }) => hasPageVisualContent(page));
+  if (targets.length === 0) {
+    alert('書き出せるページがありません。素材やテキストを追加してください。');
+    return;
+  }
+  const originalIndex = state.currentPageIndex;
+  els.exportAllBtn.disabled = true;
+  els.exportBtn.disabled = true;
+  try {
+    const zip = new JSZip();
+    // ファイル名は .mj 名から拡張子を除いたものを基準にする(未保存なら既定名)
+    const baseName = (state.fileName || 'gina-pages').replace(/\.mj$/i, '') || 'gina-pages';
+    const digits = String(state.pages.length).length;
+    for (const { index } of targets) {
+      switchToPage(index);
+      await nextFrame(); // 切替後のレイアウト確定を待つ
+      const pngBlob = await renderCurrentPageToPngBlob();
+      zip.file(`${baseName}-p${String(index + 1).padStart(digits, '0')}.png`, pngBlob);
+    }
+    // PNG は既圧縮なので STORE(無圧縮)で十分。zip 化の時間を節約する。
+    const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+    await saveBlob(zipBlob, `${baseName}.zip`, {
+      description: 'PNG画像 (ZIP)',
+      mimeType: 'application/zip',
+      extension: '.zip',
+    });
+  } catch (err) {
+    console.error(err);
+    alert('一括 PNG 書き出しに失敗しました: ' + (err && err.message ? err.message : err));
+  } finally {
+    // 元のページに戻す(同一ページなら early return するのでボタン状態は明示的に更新)
+    switchToPage(originalIndex);
+    updateActionButtons();
   }
 });
