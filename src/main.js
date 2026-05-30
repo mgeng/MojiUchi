@@ -95,6 +95,7 @@ const els = {
   prevPageBtn: document.getElementById('prevPageBtn'),
   nextPageBtn: document.getElementById('nextPageBtn'),
   pageIndicator: document.getElementById('pageIndicator'),
+  insertPageBtn: document.getElementById('insertPageBtn'),
   deletePageBtn: document.getElementById('deletePageBtn'),
   contextMenu: document.getElementById('contextMenu'),
   themeToggle: document.getElementById('themeToggle'),
@@ -574,6 +575,7 @@ function updatePageIndicator() {
   els.pageIndicator.textContent = `${state.currentPageIndex + 1} / ${state.pages.length}`;
   els.prevPageBtn.disabled = state.currentPageIndex === 0;
   els.nextPageBtn.disabled = state.currentPageIndex === state.pages.length - 1;
+
   els.memoTitle.textContent = `メモ (P${state.currentPageIndex + 1})`;
 }
 
@@ -1108,6 +1110,30 @@ function switchToPage(index) {
 
 els.prevPageBtn.addEventListener('click', () => switchToPage(state.currentPageIndex - 1));
 els.nextPageBtn.addEventListener('click', () => switchToPage(state.currentPageIndex + 1));
+
+function insertPage() {
+  if (!isPageEmpty(state.pages[MAX_PAGES - 1])) {
+    alert(`ページ数が上限 (${MAX_PAGES}) に達しているため、挿入できません。`);
+    return;
+  }
+  const insertAt = state.currentPageIndex;
+  // 現在ページのレイヤー DOM を退避
+  for (const l of cur.layers) {
+    if (isStickerLike(l)) removeStickerHandles(l);
+    l.el.remove();
+  }
+  // 現在ページ以降を1つ後ろへシフト
+  for (let i = MAX_PAGES - 1; i > insertAt; i--) {
+    state.pages[i] = state.pages[i - 1];
+  }
+  state.pages[insertAt] = createEmptyPage();
+  cur = state.pages[insertAt];
+  refreshPageView();
+  updatePageIndicator();
+  syncMemoFromPage();
+}
+
+els.insertPageBtn.addEventListener('click', insertPage);
 
 els.templateSelect.addEventListener('change', () => {
   const newTemplate = els.templateSelect.value;
